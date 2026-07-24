@@ -5,10 +5,13 @@ import { loadUser } from '../../middleware/loadUser.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { usersService } from '../users/users.service.js';
+import addressesRoutes from '../addresses/addresses.routes.js';
 
 const router = Router();
 
 router.use(authenticate, loadUser);
+
+router.use('/addresses', addressesRoutes);
 
 /** GET /user/me — current user's profile */
 router.get(
@@ -18,13 +21,16 @@ router.get(
   })
 );
 
-const updateMeSchema = z.object({
-  full_name: z.string().min(1).max(120).optional(),
-  phone: z.string().max(30).optional(),
-  avatar_url: z.string().url().max(500).optional(),
-}).strict().refine((value) => Object.keys(value).length > 0, {
-  message: 'At least one profile field is required',
-});
+const updateMeSchema = z
+  .object({
+    full_name: z.string().min(1).max(120).optional(),
+    phone: z.string().max(30).optional(),
+    avatar_url: z.string().url().max(500).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: 'At least one profile field is required',
+  });
 
 /** PATCH /user/me — update own profile */
 router.patch(

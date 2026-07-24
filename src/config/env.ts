@@ -8,6 +8,11 @@ const required = (key: string): string => {
   return value;
 };
 
+const optional = (key: string): string | null => {
+  const value = process.env[key];
+  return value && value.trim() ? value.trim() : null;
+};
+
 const port = Number(process.env.PORT ?? 5000);
 if (!Number.isInteger(port) || port < 1 || port > 65_535) {
   throw new Error('PORT must be an integer between 1 and 65535');
@@ -43,5 +48,12 @@ export const env = {
   supabase: {
     url: required('SUPABASE_URL'),
     serviceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
+    storageBucket: process.env.SUPABASE_STORAGE_BUCKET ?? 'product-images',
+  },
+
+  razorpay: {
+    keyId: optional('RAZORPAY_KEY_ID'),
+    keySecret: optional('RAZORPAY_KEY_SECRET'),
+    webhookSecret: optional('RAZORPAY_WEBHOOK_SECRET'),
   },
 } as const;

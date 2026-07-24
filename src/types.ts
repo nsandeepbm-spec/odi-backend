@@ -33,6 +33,8 @@ declare global {
     interface Request {
       firebaseUser?: FirebaseUserClaims;
       user?: AppUser;
+      /** Raw JSON body string for Razorpay webhook HMAC */
+      rawBody?: string;
     }
   }
 }
