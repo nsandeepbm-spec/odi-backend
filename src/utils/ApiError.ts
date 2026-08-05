@@ -22,4 +22,8 @@ export class ApiError extends Error {
   static notFound(message = 'Resource not found') {
     return new ApiError(404, message);
   }
+
+  static internal(message = 'Internal server error', details?: unknown) {
+    return new ApiError(500, message, details);
+  }
 }

@@ -83,16 +83,20 @@ export class AdminOverviewService {
     });
 
     const imageMap = await this.primaryImages(productRows.map((p) => p.id));
-    const catalog = productRows.slice(0, 6).map((p) => ({
-      id: p.id,
-      slug: p.slug,
-      name: p.name,
-      volume: p.volume,
-      status: p.status,
-      stockQty: p.stock_qty,
-      pricePaise: p.price_paise,
-      imageUrl: imageMap.get(p.id) ?? null,
-    }));
+    const catalog = productRows.slice(0, 6).map((p) => {
+      const imgs = imageMap.get(p.id) ?? [];
+      const card = imgs.find((i) => i.kind === 'card') ?? imgs.find((i) => i.is_primary) ?? imgs[0];
+      return {
+        id: p.id,
+        slug: p.slug,
+        name: p.name,
+        volume: p.volume,
+        status: p.status,
+        stockQty: p.stock_qty,
+        pricePaise: p.price_paise,
+        imageUrl: card?.url ?? null,
+      };
+    });
 
     const revenueSeries = this.buildRevenueSeries(paidLike);
 
@@ -136,18 +140,18 @@ export class AdminOverviewService {
   }
 
   private async primaryImages(productIds: string[]) {
-    const map = new Map<string, string>();
+    const map = new Map<string, Array<{ url: string; kind?: string; is_primary?: boolean }>>();
     if (!productIds.length) return map;
     const { data, error } = await supabase
       .from('product_images')
-      .select('product_id, url, is_primary, sort_order')
+      .select('product_id, url, kind, is_primary, sort_order')
       .in('product_id', productIds)
       .order('sort_order', { ascending: true });
     if (error) throw error;
     for (const img of data ?? []) {
-      if (!map.has(img.product_id) || img.is_primary) {
-        map.set(img.product_id, img.url);
-      }
+      const list = map.get(img.product_id) ?? [];
+      list.push(img);
+      map.set(img.product_id, list);
     }
     return map;
   }

@@ -14,6 +14,7 @@ export interface AppUser {
   role: UserRole;
   provider: string;
   status: UserStatus;
+  is_super_admin: boolean;
   last_login_at: string | null;
   created_at: string;
   updated_at: string;

@@ -34,6 +34,8 @@ export class CheckoutService {
       items?: LineInput[];
       useCart?: boolean;
       couponCode?: string | null;
+      /** 'razorpay' (default) creates Razorpay order; 'cod' skips payment gateway. */
+      paymentMethod?: 'razorpay' | 'cod';
     },
     idempotencyKey: string
   ) {
@@ -45,13 +47,15 @@ export class CheckoutService {
       .maybeSingle();
 
     if (existing) {
+      const existingIsCod = !existing.razorpay_order_id;
       return {
         orderId: existing.id,
         orderNumber: existing.order_number,
-        razorpayOrderId: existing.razorpay_order_id,
+        razorpayOrderId: existing.razorpay_order_id ?? null,
         amount: existing.total_paise,
         currency: existing.currency,
-        keyId: env.razorpay.keyId,
+        keyId: existingIsCod ? null : env.razorpay.keyId,
+        isCod: existingIsCod,
         reused: true,
       };
     }
@@ -143,13 +147,15 @@ export class CheckoutService {
           .eq('idempotency_key', idempotencyKey)
           .single();
         if (raced) {
+          const racedIsCod = !raced.razorpay_order_id;
           return {
             orderId: raced.id,
             orderNumber: raced.order_number,
-            razorpayOrderId: raced.razorpay_order_id,
+            razorpayOrderId: raced.razorpay_order_id ?? null,
             amount: raced.total_paise,
             currency: raced.currency,
-            keyId: env.razorpay.keyId,
+            keyId: racedIsCod ? null : env.razorpay.keyId,
+            isCod: racedIsCod,
             reused: true,
           };
         }
@@ -162,24 +168,74 @@ export class CheckoutService {
     );
     if (itemsError) throw itemsError;
 
-    // Create payment placeholder + Razorpay order
-    const rzp = getRazorpay();
-    const rzpOrder = await rzp.orders.create({
-      amount: totalPaise,
-      currency: 'INR',
-      receipt: order.id.slice(0, 40),
-      notes: { order_id: order.id, order_number: orderNumber },
+    await this.notifyOrderCreated({
+      id: order.id,
+      user_id: userId,
+      order_number: orderNumber,
+      total_paise: totalPaise,
     });
 
-    await supabase
-      .from('orders')
-      .update({ razorpay_order_id: rzpOrder.id })
-      .eq('id', order.id);
+    const isCod = input.paymentMethod === 'cod';
 
+    {
+      const { sendOrderPlacedEmail } = await import('../../lib/mailer/index.js');
+      const shipEmail =
+        typeof shipping.email === 'string' && shipping.email.includes('@')
+          ? shipping.email
+          : userEmail;
+      sendOrderPlacedEmail({
+        to: shipEmail,
+        name: `${shipping.first_name} ${shipping.last_name}`.trim(),
+        orderNumber,
+        totalPaise,
+        isCod,
+      });
+    }
+
+    if (!isCod) {
+      // Online payment: create Razorpay order + payment placeholder
+      const rzp = getRazorpay();
+      const rzpOrder = await rzp.orders.create({
+        amount: totalPaise,
+        currency: 'INR',
+        receipt: order.id.slice(0, 40),
+        notes: { order_id: order.id, order_number: orderNumber },
+      });
+
+      await supabase
+        .from('orders')
+        .update({ razorpay_order_id: rzpOrder.id })
+        .eq('id', order.id);
+
+      await supabase.from('payments').insert({
+        order_id: order.id,
+        provider: 'razorpay',
+        provider_order_id: rzpOrder.id,
+        amount_paise: totalPaise,
+        currency: 'INR',
+        status: 'created',
+      });
+
+      if (input.useCart) {
+        await cartService.clear(userId);
+      }
+
+      return {
+        orderId: order.id,
+        orderNumber,
+        razorpayOrderId: rzpOrder.id,
+        amount: totalPaise,
+        currency: 'INR',
+        keyId: env.razorpay.keyId,
+        isCod: false,
+        reused: false,
+      };
+    }
+
+    // COD: order stays 'pending'; admin marks it paid after delivery
     await supabase.from('payments').insert({
       order_id: order.id,
-      provider: 'razorpay',
-      provider_order_id: rzpOrder.id,
+      provider: 'cod',
       amount_paise: totalPaise,
       currency: 'INR',
       status: 'created',
@@ -192,10 +248,11 @@ export class CheckoutService {
     return {
       orderId: order.id,
       orderNumber,
-      razorpayOrderId: rzpOrder.id,
+      razorpayOrderId: null,
       amount: totalPaise,
       currency: 'INR',
-      keyId: env.razorpay.keyId,
+      keyId: null,
+      isCod: true,
       reused: false,
     };
   }
@@ -277,6 +334,46 @@ export class CheckoutService {
       }
     }
     return map;
+  }
+
+  /** Customer + admins each get their own row (scoped by user_id). */
+  private async notifyOrderCreated(order: {
+    id: string;
+    user_id: string;
+    order_number: string;
+    total_paise: number;
+  }) {
+    const { notificationsService } = await import('../notifications/notifications.service.js');
+    const amountInr = (order.total_paise / 100).toLocaleString('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0,
+    });
+
+    await notificationsService.safeCreate({
+      userId: order.user_id,
+      type: 'order_created',
+      title: 'Order placed',
+      body: `Order ${order.order_number} · ${amountInr} — complete payment to confirm.`,
+      link: `/dashboard/orders/${order.id}`,
+      metadata: { order_id: order.id, order_number: order.order_number },
+    });
+
+    // Admins get separate rows on their own user_id — never shared across customers
+    await notificationsService.notifyAdmins(
+      {
+        type: 'admin_order_created',
+        title: 'New order placed',
+        body: `${order.order_number} · ${amountInr}`,
+        link: `/dashboard/admin/orders/${order.id}`,
+        metadata: {
+          order_id: order.id,
+          order_number: order.order_number,
+          user_id: order.user_id,
+        },
+      },
+      { excludeUserId: order.user_id }
+    );
   }
 }
 

@@ -89,6 +89,31 @@ export class ReviewsService {
     return data;
   }
 
+  async listForUser(userId: string) {
+    const { data, error } = await supabase
+      .from('product_reviews')
+      .select(
+        `
+        id, product_id, user_id, rating, title, body, created_at, updated_at,
+        products ( slug, name )
+      `
+      )
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return (data ?? []).map((row: Record<string, unknown>) => {
+      const product = row.products as { slug: string; name: string } | null;
+      const { products: _p, ...rest } = row;
+      return {
+        ...rest,
+        product_slug: product?.slug ?? null,
+        product_name: product?.name ?? null,
+      };
+    });
+  }
+
   async remove(reviewId: string, userId: string, isAdmin: boolean) {
     const { data: existing, error: findErr } = await supabase
       .from('product_reviews')

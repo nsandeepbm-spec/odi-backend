@@ -45,10 +45,12 @@ export function createApp() {
   );
   app.use(morgan(env.isProd ? 'combined' : 'dev'));
 
+  // Health — no uptime/internals exposed
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', uptime: process.uptime() });
+    res.json({ status: 'ok' });
   });
 
+  // Global limiter: 300 req / 15 min per IP
   app.use(
     rateLimit({
       windowMs: 15 * 60 * 1000,
@@ -59,7 +61,25 @@ export function createApp() {
     })
   );
 
-  app.use('/auth', authRoutes);
+  // Auth limiter: 20 req / 15 min per IP — brute-force protection
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { success: false, error: { message: 'Too many login attempts. Try again later.' } },
+  });
+
+  // Webhook limiter: 60 req / 15 min — Razorpay retries at most a few times
+  const webhookLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { success: false, error: { message: 'Too many webhook requests.' } },
+  });
+
+  app.use('/auth', authLimiter, authRoutes);
   app.use('/user', userRoutes);
   app.use('/users', usersRoutes);
   // Mount before /products so /:slug/reviews is not swallowed by product detail.
@@ -70,6 +90,7 @@ export function createApp() {
   app.use('/coupons', couponsRoutes);
   app.use('/checkout', checkoutRoutes);
   app.use('/orders', ordersRoutes);
+  app.use('/payments/webhook', webhookLimiter);
   app.use('/payments', paymentsRoutes);
   app.use('/admin', adminRoutes);
 

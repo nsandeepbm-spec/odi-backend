@@ -41,6 +41,11 @@ export const checkoutSessionSchema = z
       .optional(),
     useCart: z.boolean().optional().default(false),
     couponCode: z.string().min(2).max(40).optional().nullable(),
+    /**
+     * 'razorpay' (default) — create order + Razorpay payment order and return key/razorpayOrderId.
+     * 'cod'                — create order only, skip Razorpay; order stays 'pending' until admin marks paid.
+     */
+    paymentMethod: z.enum(['razorpay', 'cod']).optional().default('razorpay'),
   })
   .strict()
   .refine((v) => Boolean(v.addressId) || Boolean(v.shippingAddress), {

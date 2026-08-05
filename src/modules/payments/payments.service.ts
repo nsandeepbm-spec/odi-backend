@@ -127,7 +127,41 @@ export class PaymentsService {
       }
     }
 
+    await this.notifyOrderPaid(updatedOrder);
+
     return { order: updatedOrder, alreadyPaid: false };
+  }
+
+  async notifyOrderPaid(order: {
+    id: string;
+    user_id: string;
+    order_number: string;
+    total_paise: number;
+  }) {
+    const { notificationsService } = await import('../notifications/notifications.service.js');
+    const amountInr = (order.total_paise / 100).toLocaleString('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0,
+    });
+    await notificationsService.safeCreate({
+      userId: order.user_id,
+      type: 'order_paid',
+      title: 'Payment received',
+      body: `Order ${order.order_number} · ${amountInr}`,
+      link: `/dashboard/orders/${order.id}`,
+      metadata: { order_id: order.id, order_number: order.order_number },
+    });
+    await notificationsService.notifyAdmins(
+      {
+        type: 'admin_order_paid',
+        title: 'New paid order',
+        body: `${order.order_number} · ${amountInr}`,
+        link: `/dashboard/admin/orders/${order.id}`,
+        metadata: { order_id: order.id, order_number: order.order_number, user_id: order.user_id },
+      },
+      { excludeUserId: order.user_id }
+    );
   }
 
   async verifyClientPayment(userId: string, body: {
@@ -239,6 +273,40 @@ export class PaymentsService {
       payments: payments ?? [],
       kpis: { collectedPaise, pendingPaise, refundedPaise },
       meta: paginationMeta(count ?? 0, p, pp),
+    };
+  }
+
+  async getAdmin(id: string) {
+    const { data: payment, error } = await supabase
+      .from('payments')
+      .select(
+        'id, order_id, provider, provider_order_id, provider_payment_id, amount_paise, currency, status, created_at, updated_at, orders(id, order_number, status, total_paise, subtotal_paise, discount_paise, coupon_code, shipping_address, user_id, created_at, paid_at)'
+      )
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!payment) throw ApiError.notFound('Payment not found');
+
+    const order = (payment as { orders?: { user_id?: string } | null }).orders ?? null;
+    let user = null;
+    if (order?.user_id) {
+      const { data: profile } = await supabase
+        .from('users')
+        .select('id, email, full_name, avatar_url, phone, role, status')
+        .eq('id', order.user_id)
+        .maybeSingle();
+      user = profile ?? null;
+    }
+
+    const { orders: orderRow, ...paymentRow } = payment as typeof payment & {
+      orders?: unknown;
+    };
+
+    return {
+      payment: paymentRow,
+      order: orderRow ?? null,
+      user,
     };
   }
 }

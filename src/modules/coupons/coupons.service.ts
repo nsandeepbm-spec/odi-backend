@@ -129,7 +129,18 @@ export class CouponsService {
     };
   }
 
-  async createAdmin(input: Omit<CouponRow, 'id' | 'created_at' | 'updated_at' | 'used_count'>) {
+  async createAdmin(input: {
+    code: string;
+    type: 'percent' | 'fixed_paise';
+    value: number;
+    min_subtotal_paise?: number;
+    max_discount_paise?: number | null;
+    max_uses?: number | null;
+    per_user_limit?: number;
+    starts_at?: string | null;
+    ends_at?: string | null;
+    active?: boolean;
+  }) {
     const { data, error } = await supabase
       .from('coupons')
       .insert({ ...input, code: input.code.trim().toUpperCase() })
@@ -140,7 +151,7 @@ export class CouponsService {
     return data;
   }
 
-  async updateAdmin(id: string, updates: Partial<CouponRow>) {
+  async updateAdmin(id: string, updates: Partial<CouponRow & { max_discount_paise?: number | null; max_uses?: number | null }>) {
     const payload = { ...updates };
     if (payload.code) payload.code = payload.code.trim().toUpperCase();
 

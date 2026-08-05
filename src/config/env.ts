@@ -56,4 +56,27 @@ export const env = {
     keySecret: optional('RAZORPAY_KEY_SECRET'),
     webhookSecret: optional('RAZORPAY_WEBHOOK_SECRET'),
   },
+
+  /** Public site URL for email CTAs (local, ngrok, or production). */
+  frontendUrl: (optional('FRONTEND_URL') ?? 'http://localhost:5173').replace(/\/$/, ''),
+
+  mail: {
+    from: optional('MAIL_FROM') ?? 'ODI <odistudio24@gmail.com>',
+    /** Absolute HTTPS logo URL for email clients (Supabase Storage recommended). */
+    logoUrl:
+      optional('MAIL_LOGO_URL') ??
+      'https://joiezvghtlyeyhuyvnwl.supabase.co/storage/v1/object/public/product-images/brand/odi-email-logo.png',
+    instagramUrl: optional('MAIL_INSTAGRAM_URL'),
+    linkedinUrl: optional('MAIL_LINKEDIN_URL'),
+    youtubeUrl: optional('MAIL_YOUTUBE_URL'),
+    facebookUrl: optional('MAIL_FACEBOOK_URL'),
+    smtp: {
+      host: optional('SMTP_HOST') ?? 'smtp.gmail.com',
+      port: Number(process.env.SMTP_PORT ?? 465),
+      secure: (process.env.SMTP_SECURE ?? 'true') !== 'false',
+      user: optional('SMTP_USER'),
+      // Gmail App Passwords are often pasted with spaces — strip them.
+      pass: optional('SMTP_PASS')?.replace(/\s+/g, '') ?? null,
+    },
+  },
 } as const;

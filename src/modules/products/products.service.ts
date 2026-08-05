@@ -1,14 +1,9 @@
 import { supabase } from '../../config/supabase.js';
 import { ApiError } from '../../utils/ApiError.js';
+import { env } from '../../config/env.js';
 import { clampPage, clampPerPage, paginationMeta } from '../../lib/pagination.js';
+import { bundleProductImages, normalizeImageInputs, type ImageInput } from '../../lib/productImages.js';
 import type { ProductImageRow, ProductRow, ProductWithMeta } from './products.types.js';
-
-type ImageInput = {
-  url: string;
-  alt?: string | null;
-  sort_order?: number;
-  is_primary?: boolean;
-};
 
 async function ratingMap(productIds: string[]): Promise<Map<string, { avg: number; count: number }>> {
   const map = new Map<string, { avg: number; count: number }>();
@@ -64,9 +59,11 @@ function attachMeta(
 ): ProductWithMeta[] {
   return products.map((p) => {
     const r = ratings.get(p.id);
+    const productImages = images.get(p.id) ?? [];
     return {
       ...p,
-      images: images.get(p.id) ?? [],
+      images: productImages,
+      media: bundleProductImages(productImages),
       rating_avg: r?.avg ?? 0,
       rating_count: r?.count ?? 0,
     };
@@ -115,7 +112,7 @@ export class ProductsService {
     };
   }
 
-  async listAdmin(query: { page?: number; perPage?: number; status?: string }) {
+  async listAdmin(query: { page?: number; perPage?: number; status?: string; q?: string }) {
     const page = clampPage(query.page);
     const perPage = clampPerPage(query.perPage);
     const from = (page - 1) * perPage;
@@ -125,9 +122,14 @@ export class ProductsService {
       .from('products')
       .select('*', { count: 'exact' })
       .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: false })
       .range(from, to);
 
     if (query.status) qb = qb.eq('status', query.status);
+    if (query.q?.trim()) {
+      const q = query.q.trim();
+      qb = qb.or(`name.ilike.%${q}%,slug.ilike.%${q}%,description.ilike.%${q}%`);
+    }
 
     const { data, error, count } = await qb;
     if (error) throw error;
@@ -182,23 +184,14 @@ export class ProductsService {
     await supabase.from('product_images').delete().eq('product_id', productId);
     if (images.length === 0) return;
 
-    let primarySet = false;
-    const rows = images.map((img, i) => {
-      const isPrimary = img.is_primary === true && !primarySet;
-      if (isPrimary) primarySet = true;
-      return {
-        product_id: productId,
-        url: img.url,
-        alt: img.alt ?? null,
-        sort_order: img.sort_order ?? i,
-        is_primary: isPrimary || (!primarySet && i === 0 && images.every((x) => !x.is_primary)),
-      };
-    });
-
-    // Ensure exactly one primary
-    if (!rows.some((r) => r.is_primary) && rows[0]) {
-      rows[0].is_primary = true;
-    }
+    const rows = normalizeImageInputs(images).map((img) => ({
+      product_id: productId,
+      url: img.url,
+      alt: img.alt,
+      sort_order: img.sort_order,
+      kind: img.kind,
+      is_primary: img.is_primary,
+    }));
 
     const { error } = await supabase.from('product_images').insert(rows);
     if (error) throw error;
@@ -206,6 +199,11 @@ export class ProductsService {
 
   async create(input: Record<string, unknown>) {
     const { images, ...fields } = input as { images?: ImageInput[] } & Record<string, unknown>;
+
+    if (fields.status === 'live' && !(images && images.length > 0)) {
+      throw ApiError.badRequest('Live products require at least one card image');
+    }
+
     const { data, error } = await supabase
       .from('products')
       .insert(fields)
@@ -221,7 +219,9 @@ export class ProductsService {
       await this.replaceImages(data.id, images);
     }
 
-    return this.getById(data.id);
+    const product = await this.getById(data.id);
+    if (!product) throw ApiError.internal('Product created but could not be reloaded');
+    return product;
   }
 
   async update(id: string, input: Record<string, unknown>) {
@@ -229,6 +229,15 @@ export class ProductsService {
     if (!existing) throw ApiError.notFound('Product not found');
 
     const { images, ...fields } = input as { images?: ImageInput[] } & Record<string, unknown>;
+
+    const nextStatus = (fields.status as string | undefined) ?? existing.status;
+    if (nextStatus === 'live') {
+      const willHaveImages =
+        images !== undefined ? images.length > 0 : (existing.media?.card != null || existing.images.length > 0);
+      if (!willHaveImages) {
+        throw ApiError.badRequest('Live products require at least one card image');
+      }
+    }
 
     if (Object.keys(fields).length > 0) {
       const { error } = await supabase.from('products').update(fields).eq('id', id);
@@ -242,27 +251,41 @@ export class ProductsService {
       await this.replaceImages(id, images);
     }
 
-    return this.getById(id);
+    const product = await this.getById(id);
+    if (!product) throw ApiError.notFound('Product not found');
+
+    // Waitlist emails: only when status transitions *into* live (products.status is source of truth).
+    if (existing.status !== 'live' && product.status === 'live') {
+      try {
+        const { notifyMeService } = await import('../notify-me/notify-me.service.js');
+        await notifyMeService.onProductWentLive({
+          id: product.id,
+          slug: product.slug,
+          name: product.name,
+        });
+      } catch (err) {
+        console.error('[notify-me] failed to process waitlist after product went live', err);
+      }
+    }
+
+    return product;
   }
   async uploadImage(fileBuffer: Buffer, mimetype: string, originalName: string): Promise<string> {
+    const bucket = env.supabase.storageBucket;
     const ext = originalName.split('.').pop()?.toLowerCase() || 'png';
     const filename = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}.${ext}`;
     const filePath = `images/${filename}`;
 
-    const { data, error } = await supabase.storage
-      .from('product-images')
-      .upload(filePath, fileBuffer, {
-        contentType: mimetype,
-        upsert: false,
-      });
+    const { error } = await supabase.storage.from(bucket).upload(filePath, fileBuffer, {
+      contentType: mimetype,
+      upsert: false,
+    });
 
     if (error) {
-      throw new Error(`Failed to upload image to Supabase Storage: ${error.message}`);
+      throw new Error(`Failed to upload image to Supabase Storage (${bucket}): ${error.message}`);
     }
 
-    const { data: publicUrlData } = supabase.storage
-      .from('product-images')
-      .getPublicUrl(filePath);
+    const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(filePath);
 
     return publicUrlData.publicUrl;
   }

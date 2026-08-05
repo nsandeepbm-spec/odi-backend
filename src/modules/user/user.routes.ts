@@ -6,12 +6,22 @@ import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { usersService } from '../users/users.service.js';
 import addressesRoutes from '../addresses/addresses.routes.js';
+import favoritesRoutes from '../favorites/favorites.routes.js';
+import notifyMeRoutes from '../notify-me/notify-me.routes.js';
+import notificationsRoutes from '../notifications/notifications.routes.js';
+import supportRoutes from '../support/support.routes.js';
+import userReviewsRoutes from '../reviews/user-reviews.routes.js';
 
 const router = Router();
 
 router.use(authenticate, loadUser);
 
 router.use('/addresses', addressesRoutes);
+router.use('/favorites', favoritesRoutes);
+router.use('/notify-me', notifyMeRoutes);
+router.use('/notifications', notificationsRoutes);
+router.use('/support-tickets', supportRoutes);
+router.use('/reviews', userReviewsRoutes);
 
 /** GET /user/me — current user's profile */
 router.get(
