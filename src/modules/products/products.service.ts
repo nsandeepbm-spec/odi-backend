@@ -197,12 +197,42 @@ export class ProductsService {
     if (error) throw error;
   }
 
+  private assertLivePackaging(
+    product: {
+      status?: string;
+      weight_grams?: number | null;
+      length_cm?: number | null;
+      width_cm?: number | null;
+      height_cm?: number | null;
+    },
+    status = product.status
+  ) {
+    if (status !== 'live') return;
+    const { weight_grams, length_cm, width_cm, height_cm } = product;
+    if (
+      weight_grams == null ||
+      length_cm == null ||
+      width_cm == null ||
+      height_cm == null ||
+      weight_grams <= 0 ||
+      Number(length_cm) <= 0 ||
+      Number(width_cm) <= 0 ||
+      Number(height_cm) <= 0
+    ) {
+      throw ApiError.badRequest(
+        'Live products require parcel weight (grams) and dimensions (length × width × height in cm)'
+      );
+    }
+  }
+
   async create(input: Record<string, unknown>) {
     const { images, ...fields } = input as { images?: ImageInput[] } & Record<string, unknown>;
 
     if (fields.status === 'live' && !(images && images.length > 0)) {
       throw ApiError.badRequest('Live products require at least one card image');
     }
+
+    this.assertLivePackaging(fields);
 
     const { data, error } = await supabase
       .from('products')
@@ -237,6 +267,7 @@ export class ProductsService {
       if (!willHaveImages) {
         throw ApiError.badRequest('Live products require at least one card image');
       }
+      this.assertLivePackaging({ ...existing, ...fields }, nextStatus);
     }
 
     if (Object.keys(fields).length > 0) {

@@ -35,6 +35,7 @@ src/modules/
 ├── checkout/      POST /checkout/sessions
 ├── orders/        GET /orders, /orders/:id
 ├── payments/      webhook + verify + mark-paid
+├── shipping/      Delhivery pincode serviceability (step 1 of fulfillment)
 └── admin/         /admin/products, /admin/orders
 ```
 

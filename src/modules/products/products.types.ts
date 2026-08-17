@@ -31,6 +31,10 @@ export interface ProductRow {
   language: string | null;
   age_range: string | null;
   pages: number | null;
+  weight_grams: number | null;
+  length_cm: number | null;
+  width_cm: number | null;
+  height_cm: number | null;
   publisher_bio: string | null;
   author_bio: string | null;
   editorial_review: string | null;

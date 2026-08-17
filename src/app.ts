@@ -16,6 +16,7 @@ import checkoutRoutes from './modules/checkout/checkout.routes.js';
 import ordersRoutes from './modules/orders/orders.routes.js';
 import paymentsRoutes from './modules/payments/payments.routes.js';
 import adminRoutes from './modules/admin/admin.routes.js';
+import shippingRoutes from './modules/shipping/shipping.routes.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
 export function createApp() {
@@ -92,6 +93,7 @@ export function createApp() {
   app.use('/orders', ordersRoutes);
   app.use('/payments/webhook', webhookLimiter);
   app.use('/payments', paymentsRoutes);
+  app.use('/shipping', shippingRoutes);
   app.use('/admin', adminRoutes);
 
   app.use(notFoundHandler);

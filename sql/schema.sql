@@ -136,6 +136,10 @@ create table public.products (
   language                 text default 'English',
   age_range                text,
   pages                    integer check (pages is null or pages > 0),
+  weight_grams             integer check (weight_grams is null or weight_grams > 0),
+  length_cm                numeric(6, 1) check (length_cm is null or length_cm > 0),
+  width_cm                 numeric(6, 1) check (width_cm is null or width_cm > 0),
+  height_cm                numeric(6, 1) check (height_cm is null or height_cm > 0),
   price_paise              integer not null check (price_paise >= 0),
   compare_at_paise         integer check (compare_at_paise is null or compare_at_paise >= 0),
   stock_qty                integer not null default 0 check (stock_qty >= 0),
@@ -175,6 +179,14 @@ comment on column public.products.editorial_review_author is
   'Author of the featured editorial review.';
 comment on column public.products.editorial_review_rating is
   'Star rating (1–5) for the editorial review.';
+comment on column public.products.weight_grams is
+  'Shippable parcel weight in grams (Delhivery / courier).';
+comment on column public.products.length_cm is
+  'Parcel length in cm (longest edge).';
+comment on column public.products.width_cm is
+  'Parcel width in cm.';
+comment on column public.products.height_cm is
+  'Parcel height in cm (stack height).';
 
 create index products_status_idx on public.products (status);
 create index products_sort_idx on public.products (sort_order, created_at);

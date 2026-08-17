@@ -43,6 +43,10 @@ const productBodyBase = z.object({
   language: z.string().max(60).optional().nullable(),
   age_range: z.string().max(60).optional().nullable(),
   pages: z.number().int().positive().optional().nullable(),
+  weight_grams: z.number().int().positive().optional().nullable(),
+  length_cm: z.number().positive().max(9999).optional().nullable(),
+  width_cm: z.number().positive().max(9999).optional().nullable(),
+  height_cm: z.number().positive().max(9999).optional().nullable(),
   publisher_bio: z.string().max(2000).optional().nullable(),
   author_bio: z.string().max(2000).optional().nullable(),
   editorial_review: z.string().max(2000).optional().nullable(),
@@ -71,6 +75,18 @@ export const createProductSchema = productBodyBase
   .refine(
     (v) => v.status !== 'live' || hasCardImage(v.images),
     { message: 'Live products require at least one card image', path: ['images'] }
+  )
+  .refine(
+    (v) =>
+      v.status !== 'live' ||
+      (v.weight_grams != null &&
+        v.length_cm != null &&
+        v.width_cm != null &&
+        v.height_cm != null),
+    {
+      message: 'Live products require weight (g) and parcel dimensions (L × W × H cm)',
+      path: ['weight_grams'],
+    }
   );
 
 export const updateProductSchema = productBodyBase

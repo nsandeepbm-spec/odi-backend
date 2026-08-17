@@ -5,6 +5,7 @@ TypeScript Express API for the ODI Kids storefront + dashboards.
 - **Auth:** Firebase Authentication (Google + email/password). Frontend sends `Authorization: Bearer <idToken>`.
 - **Database:** Supabase (Postgres) via service-role key. RLS blocks direct client access.
 - **Payments:** Razorpay (test or live keys). Orders are confirmed via signed webhook or client verify.
+- **Shipping:** Delhivery Express (staging by default). Pin-code serviceability via `GET /shipping/pincode/:pincode`.
 - **Email:** Gmail SMTP (`odistudio24@gmail.com`) — welcome, order placed, product-live. Set `SMTP_PASS` to a Google App Password.
 
 ## Setup
@@ -26,6 +27,27 @@ npm run dev              # http://localhost:5000
    - `FRONTEND_URL=` your site (localhost or ngrok URL for CTA links)
 
 Without `SMTP_PASS`, the API still runs and logs emails to the console.
+
+### Delhivery (shipping — step 1: pincode check)
+
+1. Delhivery One → **Settings → API Setup** → copy API token (staging token for test).
+2. Set in `.env`:
+
+```env
+# Active: staging | production
+DELHIVERY_ENV=staging
+
+# Base URLs (reference — backend resolves from DELHIVERY_ENV)
+DELHIVERY_STAGING_BASE_URL=https://staging-express.delhivery.com
+DELHIVERY_PRODUCTION_BASE_URL=https://track.delhivery.com
+
+DELHIVERY_API_KEY=<your-staging-token>
+```
+
+3. Pincode API path (built by backend): `{ACTIVE_BASE}/c/api/pin-codes/json/?filter_codes={pincode}`
+
+Test: `GET http://localhost:5000/shipping/pincode/110001`
+
 ### SQL (run once in Supabase SQL Editor)
 
 Run **`sql/schema.sql`** — single source of truth for users + commerce (products, images, reviews, favorites, notify-me waitlist, addresses, cart, coupons, orders, payments).
@@ -35,6 +57,7 @@ Run **`sql/schema.sql`** — single source of truth for users + commerce (produc
 **Existing DB (additive):** if you already ran an older schema, run:
 - `sql/004_product_notify_requests.sql` — Notify Me waitlist
 - `sql/006_notifications_clear_and_support.sql` — `cleared_at` on notifications + `support_tickets`
+- `sql/007_product_shipping_dimensions.sql` — parcel weight/dimensions on `products`
 
 
 After first sign-in, promote yourself:
@@ -105,6 +128,7 @@ Response shape: `{ success, data }` or `{ success: false, error: { message } }`.
 | GET | `/orders/:id` | Bearer | Order detail + items + payments |
 | POST | `/payments/webhook` | Razorpay signature | Mark paid (idempotent) |
 | POST | `/payments/verify` | Bearer | Client signature verify after Checkout |
+| GET | `/shipping/pincode/:pincode` | none | Delhivery pin-code serviceability |
 | GET | `/admin/overview` | Admin | KPIs, revenue series, catalog snapshot, recent orders |
 | GET | `/admin/products` | Admin | Catalog list (`?page&perPage&status&q`) |
 | GET | `/admin/products/:id` | Admin | Single product (editor) |

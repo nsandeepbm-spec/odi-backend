@@ -79,4 +79,28 @@ export const env = {
       pass: optional('SMTP_PASS')?.replace(/\s+/g, '') ?? null,
     },
   },
+
+  /** Delhivery Express — staging vs production base URL + API token. */
+  delhivery: (() => {
+    const rawEnv = (optional('DELHIVERY_ENV') ?? 'staging').toLowerCase();
+    const environment =
+      rawEnv === 'production' || rawEnv === 'live' ? 'production' : 'staging';
+
+    const stagingBaseUrl =
+      optional('DELHIVERY_STAGING_BASE_URL') ?? 'https://staging-express.delhivery.com';
+    const productionBaseUrl =
+      optional('DELHIVERY_PRODUCTION_BASE_URL') ?? 'https://track.delhivery.com';
+
+    return {
+      apiKey: optional('DELHIVERY_API_KEY'),
+      environment: environment as 'staging' | 'production',
+      stagingBaseUrl: stagingBaseUrl.replace(/\/$/, ''),
+      productionBaseUrl: productionBaseUrl.replace(/\/$/, ''),
+      /** Resolved base URL for the active DELHIVERY_ENV. */
+      baseUrl: (environment === 'production' ? productionBaseUrl : stagingBaseUrl).replace(
+        /\/$/,
+        ''
+      ),
+    };
+  })(),
 } as const;
