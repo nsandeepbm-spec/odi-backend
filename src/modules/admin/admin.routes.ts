@@ -161,6 +161,26 @@ router.patch(
   })
 );
 
+/** POST /admin/orders/:id/shipment — Delhivery manifest (fetch waybill + create). */
+router.post(
+  '/orders/:id/shipment',
+  asyncHandler(async (req, res) => {
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    const result = await fulfillmentService.createShipmentForOrder(param(req.params.id, 'id'));
+    res.json({ success: true, data: { order: result.order } });
+  })
+);
+
+/** POST /admin/orders/:id/pickup — Delhivery pickup request (not implemented yet). */
+router.post(
+  '/orders/:id/pickup',
+  asyncHandler(async (_req, res) => {
+    throw ApiError.badRequest(
+      'Delhivery pickup request API is not implemented yet. Shipment is created automatically after payment.'
+    );
+  })
+);
+
 /** GET /admin/payments */
 router.get(
   '/payments',

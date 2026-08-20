@@ -91,11 +91,34 @@ export const env = {
     const productionBaseUrl =
       optional('DELHIVERY_PRODUCTION_BASE_URL') ?? 'https://track.delhivery.com';
 
+    const stagingToken =
+      optional('DELHIVERY_STAGING_TOKEN') ?? optional('DELHIVERY_API_KEY');
+    const productionToken =
+      optional('DELHIVERY_PRODUCTION_TOKEN') ?? optional('DELHIVERY_API_KEY');
+    const apiKey = environment === 'production' ? productionToken : stagingToken;
+
+    const originPin = optional('DELHIVERY_ORIGIN_PIN');
+    const rawMot = (optional('DELHIVERY_MOT') ?? 'S').toUpperCase();
+    const mot = rawMot === 'E' || rawMot === 'EXPRESS' ? 'E' : 'S';
+    const pdt = optional('DELHIVERY_PDT') ?? 'Pre-paid';
+    /** Client name for Fetch Waybill API (`?cl=`). From Delhivery One API token / account. */
+    const clientName = optional('DELHIVERY_CLIENT_NAME');
+    /** Registered pickup location name in Delhivery One (warehouse). */
+    const pickupLocationName = optional('DELHIVERY_PICKUP_LOCATION_NAME');
+
     return {
-      apiKey: optional('DELHIVERY_API_KEY'),
+      apiKey,
       environment: environment as 'staging' | 'production',
       stagingBaseUrl: stagingBaseUrl.replace(/\/$/, ''),
       productionBaseUrl: productionBaseUrl.replace(/\/$/, ''),
+      /** Registered pickup warehouse PIN (origin for TAT + future shipment creation). */
+      originPin,
+      /** Mode of transport: E = Express, S = Surface. */
+      mot,
+      /** Payment type for TAT lookup (ODI checkout is prepaid). */
+      pdt,
+      clientName,
+      pickupLocationName,
       /** Resolved base URL for the active DELHIVERY_ENV. */
       baseUrl: (environment === 'production' ? productionBaseUrl : stagingBaseUrl).replace(
         /\/$/,

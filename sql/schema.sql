@@ -412,6 +412,10 @@ create table public.orders (
   razorpay_order_id   text unique,
   idempotency_key     text not null unique,
   paid_at             timestamptz,
+  delhivery_waybill   text,
+  delhivery_status    text,
+  delhivery_pickup_token text,
+  delhivery_raw       jsonb,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );

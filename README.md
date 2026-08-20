@@ -5,7 +5,7 @@ TypeScript Express API for the ODI Kids storefront + dashboards.
 - **Auth:** Firebase Authentication (Google + email/password). Frontend sends `Authorization: Bearer <idToken>`.
 - **Database:** Supabase (Postgres) via service-role key. RLS blocks direct client access.
 - **Payments:** Razorpay (test or live keys). Orders are confirmed via signed webhook or client verify.
-- **Shipping:** Delhivery Express (staging by default). Pin-code serviceability via `GET /shipping/pincode/:pincode`.
+- **Shipping:** Delhivery Express (staging by default). Pin-code serviceability via `GET /shipping/pincode/:pincode`; expected TAT via `GET /shipping/tat/:destinationPin`; shipping cost via `GET /shipping/charges/:destinationPin`.
 - **Email:** Gmail SMTP (`odistudio24@gmail.com`) — welcome, order placed, product-live. Set `SMTP_PASS` to a Google App Password.
 
 ## Setup
@@ -30,23 +30,44 @@ Without `SMTP_PASS`, the API still runs and logs emails to the console.
 
 ### Delhivery (shipping — step 1: pincode check)
 
-1. Delhivery One → **Settings → API Setup** → copy API token (staging token for test).
-2. Set in `.env`:
+1. Delhivery One → **Settings → API Setup** → copy API token (short **hex** string, e.g. `3f49b5ba7755…`).
+2. **Do not** paste the browser login JWT (`eyJ…` — that is not the Express API token).
+3. Set in `.env`:
 
 ```env
 # Active: staging | production
 DELHIVERY_ENV=staging
 
-# Base URLs (reference — backend resolves from DELHIVERY_ENV)
 DELHIVERY_STAGING_BASE_URL=https://staging-express.delhivery.com
 DELHIVERY_PRODUCTION_BASE_URL=https://track.delhivery.com
 
-DELHIVERY_API_KEY=<your-staging-token>
+# Separate tokens per environment (from Delhivery One → Settings → API Setup)
+DELHIVERY_STAGING_TOKEN=<staging-token>
+DELHIVERY_PRODUCTION_TOKEN=<production-token>
+
+# Legacy fallback if you only set one token:
+# DELHIVERY_API_KEY=<token>
+
+# Warehouse / pickup PIN from Delhivery One → Settings → Pickup Locations (origin for TAT)
+DELHIVERY_ORIGIN_PIN=122003
+DELHIVERY_MOT=S
+DELHIVERY_PDT=Pre-paid
+DELHIVERY_CLIENT_NAME=your-client-name
+DELHIVERY_PICKUP_LOCATION_NAME=your-warehouse-name
 ```
 
 3. Pincode API path (built by backend): `{ACTIVE_BASE}/c/api/pin-codes/json/?filter_codes={pincode}`
 
-Test: `GET http://localhost:5000/shipping/pincode/110001`
+4. Expected TAT path: `{ACTIVE_BASE}/api/dc/expected_tat?origin_pin={DELHIVERY_ORIGIN_PIN}&destination_pin={pin}&mot={DELHIVERY_MOT}`
+
+5. Shipping charges path: `{ACTIVE_BASE}/api/kinko/v1/invoice/charges/.json?md={MOT}&ss=Delivered&o_pin={ORIGIN}&d_pin={pin}&cgm={grams}&pt=Pre-paid`
+
+6. **Fulfillment** (after payment): Fetch Waybill + `POST /api/cmu/create.json` — automatic; stores `orders.delhivery_waybill` and sets status `processing`.
+
+Test:
+- `GET http://localhost:5000/shipping/pincode/110001`
+- `GET http://localhost:5000/shipping/tat/136118`
+- `GET http://localhost:5000/shipping/charges/136118?slug=space-explorer&quantity=1`
 
 ### SQL (run once in Supabase SQL Editor)
 
@@ -58,6 +79,7 @@ Run **`sql/schema.sql`** — single source of truth for users + commerce (produc
 - `sql/004_product_notify_requests.sql` — Notify Me waitlist
 - `sql/006_notifications_clear_and_support.sql` — `cleared_at` on notifications + `support_tickets`
 - `sql/007_product_shipping_dimensions.sql` — parcel weight/dimensions on `products`
+- `sql/008_order_delhivery_fields.sql` — Delhivery waybill / fulfillment columns on `orders`
 
 
 After first sign-in, promote yourself:
@@ -123,12 +145,14 @@ Response shape: `{ success, data }` or `{ success: false, error: { message } }`.
 | PATCH | `/cart/items/:productId` | Bearer | Set quantity |
 | DELETE | `/cart/items/:productId` | Bearer | Remove item |
 | POST | `/coupons/validate` | Bearer | Preview discount `{ code, items? }` |
-| POST | `/checkout/sessions` | Bearer + `Idempotency-Key` | Create pending order + Razorpay order |
+| POST | `/checkout/sessions` | Bearer + `Idempotency-Key` | Create pending order + Razorpay order (validates Delhivery PIN) |
 | GET | `/orders` | Bearer | My orders |
 | GET | `/orders/:id` | Bearer | Order detail + items + payments |
 | POST | `/payments/webhook` | Razorpay signature | Mark paid (idempotent) |
 | POST | `/payments/verify` | Bearer | Client signature verify after Checkout |
 | GET | `/shipping/pincode/:pincode` | none | Delhivery pin-code serviceability |
+| GET | `/shipping/tat/:destinationPin` | none | Delhivery expected TAT (origin → destination) |
+| GET | `/shipping/charges/:destinationPin` | none | Delhivery shipping cost (`?slug&quantity`) |
 | GET | `/admin/overview` | Admin | KPIs, revenue series, catalog snapshot, recent orders |
 | GET | `/admin/products` | Admin | Catalog list (`?page&perPage&status&q`) |
 | GET | `/admin/products/:id` | Admin | Single product (editor) |
@@ -185,6 +209,8 @@ All product responses use the same serializer (`products.presenter.ts`).
 | GET | `/admin/orders` | Admin | All orders |
 | GET | `/admin/orders/:id` | Admin | Order detail + items + payments + user |
 | PATCH | `/admin/orders/:id/status` | Admin | Update fulfillment status |
+| POST | `/admin/orders/:id/shipment` | Admin | Delhivery manifest (auto also runs after payment) |
+| POST | `/admin/orders/:id/pickup` | Admin | Not implemented yet |
 | GET | `/admin/payments` | Admin | Payment list + KPIs |
 | GET | `/admin/payments/:id` | Admin | Payment detail + linked order + user |
 | GET | `/admin/support-tickets` | Admin | Customer support tickets |

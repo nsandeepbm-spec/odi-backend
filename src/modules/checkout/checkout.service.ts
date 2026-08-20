@@ -8,6 +8,7 @@ import { cartService } from '../cart/cart.service.js';
 import { couponsService } from '../coupons/coupons.service.js';
 import { productsService } from '../products/products.service.js';
 import type { ProductRow } from '../products/products.types.js';
+import { shippingService } from '../shipping/shipping.service.js';
 
 type LineInput = { productId?: string; slug?: string; quantity: number };
 type ResolvedLine = { productId: string; quantity: number };
@@ -61,6 +62,9 @@ export class CheckoutService {
     }
 
     const shipping = await this.resolveShipping(userId, input);
+    const paymentKind = input.paymentMethod === 'cod' ? 'cod' : 'prepaid';
+    await shippingService.assertDeliverable(shipping.postal_code, paymentKind);
+
     const lines = await this.resolveLines(userId, input);
     const productIds = lines.map((l) => l.productId);
     const products = await productsService.getByIds(productIds);
@@ -111,7 +115,15 @@ export class CheckoutService {
       couponCode = coupon.code;
     }
 
-    const shippingPaise = 0;
+    const quote = await shippingService.quoteForProducts({
+      destinationPin: shipping.postal_code,
+      items: lines.map((line) => ({
+        product: products.find((p) => p.id === line.productId)!,
+        quantity: line.quantity,
+      })),
+      payment: paymentKind,
+    });
+    const shippingPaise = quote.shippingPaise;
     const totalPaise = Math.max(0, subtotalPaise - discountPaise + shippingPaise);
     if (totalPaise < 100) {
       throw ApiError.badRequest('Order total must be at least ₹1');
@@ -244,6 +256,9 @@ export class CheckoutService {
     if (input.useCart) {
       await cartService.clear(userId);
     }
+
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    fulfillmentService.tryCreateShipment(order.id);
 
     return {
       orderId: order.id,

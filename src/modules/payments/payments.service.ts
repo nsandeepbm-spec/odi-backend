@@ -129,6 +129,9 @@ export class PaymentsService {
 
     await this.notifyOrderPaid(updatedOrder);
 
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    fulfillmentService.tryCreateShipment(updatedOrder.id);
+
     return { order: updatedOrder, alreadyPaid: false };
   }
 
