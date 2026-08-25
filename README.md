@@ -75,12 +75,7 @@ DELHIVERY_LABEL_PDF_SIZE=4R
 
 After changing `.env`, restart `npm run dev`. Boot log should show `Delhivery staging b2b … pickup="ODI Staging"` or `production b2c … pickup="ODI B2C"`.
 
-```bash
-npm run test:delhivery-create
-npm run test:delhivery-pickup
-```
-
-Admin Shipments → **Retry Shipment** / **Request Pickup** against the active env.
+Admin Shipments → **Retry Shipment** / **Request Pickup** against the active env. Register the warehouse in Delhivery One for the same env/token the API uses.
 
 3. Pincode API path (built by backend): `{ACTIVE_BASE}/c/api/pin-codes/json/?filter_codes={pincode}`
 
@@ -97,17 +92,9 @@ Test:
 
 ### SQL (run once in Supabase SQL Editor)
 
-Run **`sql/schema.sql`** — single source of truth for users + commerce (products, images, reviews, favorites, notify-me waitlist, addresses, cart, coupons, orders, payments).
+Run **`sql/schema.sql`** — single source of truth for users + commerce (products, images, reviews, favorites, notify-me waitlist, notifications, support tickets, contact inquiries, career applications, addresses, cart, coupons, orders, payments, cancels, refunds).
 
-**Warning:** re-running drops and recreates commerce tables (wipes catalog/orders). Safe on empty projects only.
-
-**Existing DB (additive):** if you already ran an older schema, run:
-- `sql/004_product_notify_requests.sql` — Notify Me waitlist
-- `sql/006_notifications_clear_and_support.sql` — `cleared_at` on notifications + `support_tickets`
-- `sql/007_product_shipping_dimensions.sql` — parcel weight/dimensions on `products`
-- `sql/008_order_delhivery_fields.sql` — Delhivery waybill / fulfillment columns on `orders`
-- `sql/009_order_pickup_schedule.sql` — `delhivery_pickup_date` / `delhivery_pickup_time` for Scheduled tab
-
+**Warning:** re-running drops and recreates commerce tables (wipes catalog/orders). Safe on empty projects only. Do not re-run on a live DB that already has data.
 
 After first sign-in, promote yourself:
 
@@ -181,6 +168,8 @@ Response shape: `{ success, data }` or `{ success: false, error: { message } }`.
 | GET | `/shipping/pincode/:pincode` | none | Delhivery pin-code serviceability |
 | GET | `/shipping/tat/:destinationPin` | none | Delhivery expected TAT (origin → destination) |
 | GET | `/shipping/charges/:destinationPin` | none | Delhivery shipping cost (`?slug&quantity`) |
+| POST | `/contact` | none | Save contact / service inquiry (no email) |
+| POST | `/careers` | none | Save career application (no email) |
 | GET | `/admin/overview` | Admin | KPIs, revenue series, catalog snapshot, recent orders |
 | GET | `/admin/products` | Admin | Catalog list (`?page&perPage&status&q`) |
 | GET | `/admin/products/:id` | Admin | Single product (editor) |
@@ -247,6 +236,10 @@ All product responses use the same serializer (`products.presenter.ts`).
 | GET | `/admin/payments/:id` | Admin | Payment detail + linked order + user |
 | GET | `/admin/support-tickets` | Admin | Customer support tickets |
 | PATCH | `/admin/support-tickets/:id` | Admin | Update ticket status / note |
+| GET | `/admin/contact-inquiries` | Admin | Public contact form submissions |
+| PATCH | `/admin/contact-inquiries/:id` | Admin | Update inquiry status / note |
+| GET | `/admin/career-applications` | Admin | Public careers form submissions |
+| PATCH | `/admin/career-applications/:id` | Admin | Update application status / note |
 
 ### Checkout session body
 
@@ -323,6 +316,7 @@ src/
 │   ├── checkout/
 │   ├── orders/
 │   ├── payments/
+│   ├── inquiries/     POST /contact + /careers
 │   └── admin/
 └── utils/
 sql/

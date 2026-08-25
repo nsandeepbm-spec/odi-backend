@@ -353,4 +353,126 @@ router.patch(
   })
 );
 
+/** GET /admin/contact-inquiries */
+router.get(
+  '/contact-inquiries',
+  asyncHandler(async (req, res) => {
+    const page = typeof req.query.page === 'string' ? Number(req.query.page) : 1;
+    const perPage = typeof req.query.perPage === 'string' ? Number(req.query.perPage) : 20;
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const { inquiriesService } = await import('../inquiries/inquiries.service.js');
+    const result = await inquiriesService.listContactAdmin(page, perPage, status);
+    res.json({ success: true, data: result });
+  })
+);
+
+/** PATCH /admin/contact-inquiries/:id */
+router.patch(
+  '/contact-inquiries/:id',
+  asyncHandler(async (req, res) => {
+    const { updateInquiryAdminSchema } = await import('../inquiries/inquiries.schema.js');
+    const parsed = updateInquiryAdminSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid inquiry update', parsed.error.flatten().fieldErrors);
+    }
+    const { inquiriesService } = await import('../inquiries/inquiries.service.js');
+    const inquiry = await inquiriesService.updateContactAdmin(param(req.params.id), parsed.data);
+    res.json({ success: true, data: { inquiry } });
+  })
+);
+
+/** GET /admin/career-applications */
+router.get(
+  '/career-applications',
+  asyncHandler(async (req, res) => {
+    const page = typeof req.query.page === 'string' ? Number(req.query.page) : 1;
+    const perPage = typeof req.query.perPage === 'string' ? Number(req.query.perPage) : 20;
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const { inquiriesService } = await import('../inquiries/inquiries.service.js');
+    const result = await inquiriesService.listCareerAdmin(page, perPage, status);
+    res.json({ success: true, data: result });
+  })
+);
+
+/** PATCH /admin/career-applications/:id */
+router.patch(
+  '/career-applications/:id',
+  asyncHandler(async (req, res) => {
+    const { updateInquiryAdminSchema } = await import('../inquiries/inquiries.schema.js');
+    const parsed = updateInquiryAdminSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid application update', parsed.error.flatten().fieldErrors);
+    }
+    const { inquiriesService } = await import('../inquiries/inquiries.service.js');
+    const application = await inquiriesService.updateCareerAdmin(param(req.params.id), parsed.data);
+    res.json({ success: true, data: { application } });
+  })
+);
+
+/** GET /admin/cancels — Cancel Management */
+router.get(
+  '/cancels',
+  asyncHandler(async (req, res) => {
+    const page = typeof req.query.page === 'string' ? Number(req.query.page) : 1;
+    const perPage = typeof req.query.perPage === 'string' ? Number(req.query.perPage) : 50;
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const { cancelsService } = await import('../cancels/cancels.service.js');
+    const result = await cancelsService.listAdmin(page, perPage, status);
+    res.json({ success: true, data: result });
+  })
+);
+
+/** PATCH /admin/cancels/:id — approve / reject (Delhivery cancel on approve) */
+router.patch(
+  '/cancels/:id',
+  asyncHandler(async (req, res) => {
+    const { reviewCancelSchema } = await import('../cancels/cancels.schema.js');
+    const parsed = reviewCancelSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid cancel review', parsed.error.flatten().fieldErrors);
+    }
+    const { cancelsService } = await import('../cancels/cancels.service.js');
+    const cancel = await cancelsService.review(
+      param(req.params.id),
+      req.user!.id,
+      parsed.data.decision,
+      parsed.data.adminNote
+    );
+    res.json({ success: true, data: { cancel } });
+  })
+);
+
+/** GET /admin/refunds — Refund Management */
+router.get(
+  '/refunds',
+  asyncHandler(async (req, res) => {
+    const page = typeof req.query.page === 'string' ? Number(req.query.page) : 1;
+    const perPage = typeof req.query.perPage === 'string' ? Number(req.query.perPage) : 50;
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const { cancelsService } = await import('../cancels/cancels.service.js');
+    const result = await cancelsService.listRefundsAdmin(page, perPage, status);
+    res.json({ success: true, data: result });
+  })
+);
+
+/** PATCH /admin/refunds/:id — approve / reject / completed (Razorpay on completed) */
+router.patch(
+  '/refunds/:id',
+  asyncHandler(async (req, res) => {
+    const { reviewRefundSchema } = await import('../cancels/cancels.schema.js');
+    const parsed = reviewRefundSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid refund review', parsed.error.flatten().fieldErrors);
+    }
+    const { cancelsService } = await import('../cancels/cancels.service.js');
+    const refund = await cancelsService.reviewRefund(
+      param(req.params.id),
+      req.user!.id,
+      parsed.data.decision,
+      parsed.data.adminNote
+    );
+    res.json({ success: true, data: { refund } });
+  })
+);
+
 export default router;

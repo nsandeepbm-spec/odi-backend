@@ -9,6 +9,8 @@ export const DELHIVERY_API_PATHS = {
   invoiceCharges: '/api/kinko/v1/invoice/charges/.json',
   fetchWaybill: '/waybill/api/fetch/json/',
   createShipment: '/api/cmu/create.json',
+  /** Same path as edit; cancel uses body { waybill, cancellation: true }. */
+  editOrCancelShipment: '/api/p/edit',
   pickupRequest: '/fm/request/new/',
   packingSlip: '/api/p/packing_slip',
   trackShipment: '/api/v1/packages/json/',

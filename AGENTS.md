@@ -28,6 +28,7 @@ src/modules/
 ├── notify-me/     product launch waitlist (“Notify Me”)
 ├── notifications/ in-app inbox (bell + clear + history)
 ├── support/       customer support tickets
+├── inquiries/     public contact + careers forms (admin list)
 ├── products/      public catalog + admin writes via /admin
 ├── reviews/       nested under /products/:slug/reviews + /reviews/:id
 ├── cart/          server-side cart
@@ -94,6 +95,8 @@ Webhook:    Razorpay HMAC (raw body on /payments/webhook)
 | `product_notify_requests` | “Notify Me” waitlist; `notified_at` set after in-app launch notify; join `products.status` |
 | `notifications` | In-app bell + history; `cleared_at` hides from bell only; launch/order emails via `lib/mailer` |
 | `support_tickets` | User support queries; status open → closed |
+| `contact_inquiries` | Public `/contact` form; status new / in_review / closed |
+| `career_applications` | Public `/careers` form; status new / in_review / closed |
 | `cart_items` | unique (user_id, product_id) |
 | `coupons` | percent or fixed_paise |
 | `orders` | status machine + money + shipping jsonb + idempotency_key |
