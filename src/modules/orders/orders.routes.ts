@@ -19,6 +19,18 @@ router.get(
   })
 );
 
+/** GET /orders/:id/tracking — Delhivery package scans for the signed-in owner's order */
+router.get(
+  '/:id/tracking',
+  asyncHandler(async (req, res) => {
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    const tracking = await fulfillmentService.getTrackingForOrder(param(req.params.id), {
+      userId: req.user!.id,
+    });
+    res.json({ success: true, data: { tracking } });
+  })
+);
+
 /** GET /orders/:id */
 router.get(
   '/:id',

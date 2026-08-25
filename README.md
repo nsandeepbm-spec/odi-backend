@@ -28,33 +28,59 @@ npm run dev              # http://localhost:5000
 
 Without `SMTP_PASS`, the API still runs and logs emails to the console.
 
-### Delhivery (shipping — step 1: pincode check)
+### Delhivery (shipping)
 
-1. Delhivery One → **Settings → API Setup** → copy API token (short **hex** string, e.g. `3f49b5ba7755…`).
-2. **Do not** paste the browser login JWT (`eyJ…` — that is not the Express API token).
-3. Set in `.env`:
+`.env` has **two full credential groups**. Keep exactly one active:
+
+| Block | Account | Host | Warehouse | Wallet |
+|-------|---------|------|-----------|--------|
+| **STAGING** (default for local) | B2B JWT | `staging-express.delhivery.com` | `ODI Staging` · Delhi `110001` | Not required |
+| **PRODUCTION** | B2C hex | `track.delhivery.com` | `ODI B2C` · Mohali `160074` | Required for AWB |
+
+**Switch:** comment the whole active block, uncomment the other. Do not mix lines (e.g. staging warehouse + production token).
 
 ```env
-# Active: staging | production
-DELHIVERY_ENV=staging
-
+# Shared
 DELHIVERY_STAGING_BASE_URL=https://staging-express.delhivery.com
 DELHIVERY_PRODUCTION_BASE_URL=https://track.delhivery.com
-
-# Separate tokens per environment (from Delhivery One → Settings → API Setup)
-DELHIVERY_STAGING_TOKEN=<staging-token>
-DELHIVERY_PRODUCTION_TOKEN=<production-token>
-
-# Legacy fallback if you only set one token:
-# DELHIVERY_API_KEY=<token>
-
-# Warehouse / pickup PIN from Delhivery One → Settings → Pickup Locations (origin for TAT)
-DELHIVERY_ORIGIN_PIN=122003
 DELHIVERY_MOT=S
 DELHIVERY_PDT=Pre-paid
-DELHIVERY_CLIENT_NAME=your-client-name
-DELHIVERY_PICKUP_LOCATION_NAME=your-warehouse-name
+
+# --- STAGING (local QA) ---
+DELHIVERY_ENV=staging
+DELHIVERY_ACCOUNT_TYPE=b2b
+DELHIVERY_STAGING_TOKEN=<b2b-jwt>
+DELHIVERY_CLIENT_NAME=OTI B2B-b2b
+DELHIVERY_ORIGIN_PIN=110001
+DELHIVERY_PICKUP_LOCATION_NAME=ODI Staging
+# Warehouse + label return (keep return address short — city goes in DELHIVERY_WAREHOUSE_RETURN_CITY)
+DELHIVERY_WAREHOUSE_REGISTERED_NAME=ODI
+DELHIVERY_WAREHOUSE_ADDRESS=Connaught Place, New Delhi
+DELHIVERY_WAREHOUSE_CITY=New Delhi
+DELHIVERY_WAREHOUSE_STATE=Delhi
+DELHIVERY_WAREHOUSE_RETURN_ADDRESS=Connaught Place
+DELHIVERY_WAREHOUSE_RETURN_CITY=New Delhi
+# Label: Delhivery docs support 4R (4×6) and A4 (8×11). Admin UI always prints 4R from JSON.
+DELHIVERY_LABEL_PDF_SIZE=4R
+
+# --- PRODUCTION (go live; comment staging first) ---
+# DELHIVERY_ENV=production
+# DELHIVERY_ACCOUNT_TYPE=b2c
+# DELHIVERY_PRODUCTION_TOKEN=<b2c-hex>
+# DELHIVERY_CLIENT_NAME=OTI XB-cdp
+# DELHIVERY_ORIGIN_PIN=160074
+# DELHIVERY_PICKUP_LOCATION_NAME=ODI B2C
+# + warehouse address fields for Mohali
 ```
+
+After changing `.env`, restart `npm run dev`. Boot log should show `Delhivery staging b2b … pickup="ODI Staging"` or `production b2c … pickup="ODI B2C"`.
+
+```bash
+npm run test:delhivery-create
+npm run test:delhivery-pickup
+```
+
+Admin Shipments → **Retry Shipment** / **Request Pickup** against the active env.
 
 3. Pincode API path (built by backend): `{ACTIVE_BASE}/c/api/pin-codes/json/?filter_codes={pincode}`
 
@@ -80,6 +106,7 @@ Run **`sql/schema.sql`** — single source of truth for users + commerce (produc
 - `sql/006_notifications_clear_and_support.sql` — `cleared_at` on notifications + `support_tickets`
 - `sql/007_product_shipping_dimensions.sql` — parcel weight/dimensions on `products`
 - `sql/008_order_delhivery_fields.sql` — Delhivery waybill / fulfillment columns on `orders`
+- `sql/009_order_pickup_schedule.sql` — `delhivery_pickup_date` / `delhivery_pickup_time` for Scheduled tab
 
 
 After first sign-in, promote yourself:
@@ -148,6 +175,7 @@ Response shape: `{ success, data }` or `{ success: false, error: { message } }`.
 | POST | `/checkout/sessions` | Bearer + `Idempotency-Key` | Create pending order + Razorpay order (validates Delhivery PIN) |
 | GET | `/orders` | Bearer | My orders |
 | GET | `/orders/:id` | Bearer | Order detail + items + payments |
+| GET | `/orders/:id/tracking` | Bearer | Live Delhivery status + scans (owner) |
 | POST | `/payments/webhook` | Razorpay signature | Mark paid (idempotent) |
 | POST | `/payments/verify` | Bearer | Client signature verify after Checkout |
 | GET | `/shipping/pincode/:pincode` | none | Delhivery pin-code serviceability |
@@ -209,8 +237,12 @@ All product responses use the same serializer (`products.presenter.ts`).
 | GET | `/admin/orders` | Admin | All orders |
 | GET | `/admin/orders/:id` | Admin | Order detail + items + payments + user |
 | PATCH | `/admin/orders/:id/status` | Admin | Update fulfillment status |
-| POST | `/admin/orders/:id/shipment` | Admin | Delhivery manifest (auto also runs after payment) |
-| POST | `/admin/orders/:id/pickup` | Admin | Not implemented yet |
+| POST | `/admin/orders/:id/shipment` | Admin | Retry Delhivery create (auto also runs after payment) |
+| GET | `/admin/pickups` | Admin | Needs + scheduled pickup rows (date/time) |
+| GET | `/admin/orders/:id/shipping-label` | Admin | Delhivery PDF proxy (optional; UI renders from `/packing-slip`) |
+| GET | `/admin/orders/:id/packing-slip` | Admin | Packing slip JSON (not used for Label button) |
+| GET | `/admin/orders/:id/tracking` | Admin | Live Delhivery status + scans |
+| POST | `/admin/orders/:id/pickup` | Admin | Manual Delhivery pickup request |
 | GET | `/admin/payments` | Admin | Payment list + KPIs |
 | GET | `/admin/payments/:id` | Admin | Payment detail + linked order + user |
 | GET | `/admin/support-tickets` | Admin | Customer support tickets |

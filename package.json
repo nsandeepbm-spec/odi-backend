@@ -8,6 +8,9 @@
     "dev": "tsx watch --env-file=.env src/server.ts",
     "build": "tsc",
     "start": "node --env-file=.env dist/server.js",
+    "delhivery:register-warehouse": "tsx --env-file=.env scripts/delhivery-register-warehouse.ts",
+    "test:delhivery-create": "tsx --env-file=.env scripts/test-delhivery-create.ts",
+    "test:delhivery-pickup": "tsx --env-file=.env scripts/test-delhivery-pickup.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

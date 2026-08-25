@@ -415,6 +415,8 @@ create table public.orders (
   delhivery_waybill   text,
   delhivery_status    text,
   delhivery_pickup_token text,
+  delhivery_pickup_date text,
+  delhivery_pickup_time text,
   delhivery_raw       jsonb,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()

@@ -1,10 +1,12 @@
 import { createApp } from './app.js';
 import { env } from './config/env.js';
+import { delhiveryBootSummary } from './lib/delhivery/config.js';
 
 const app = createApp();
 
 const server = app.listen(env.port, () => {
   console.log(`✅ ODI API running at http://localhost:${env.port} (${env.nodeEnv})`);
+  console.log(`   ${delhiveryBootSummary()}`);
 });
 
 let shuttingDown = false;

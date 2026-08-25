@@ -6,8 +6,8 @@ import {
   isDelhiveryConfigured,
 } from './config.js';
 import { fetchDelhiveryPost, normalizePincode } from './client.js';
-import type { ParcelLine } from './shipping-charges.js';
-import { chargeableGramsForLines } from './shipping-charges.js';
+import { delhiveryLabelAddressFromEnv } from './label-address.js';
+import type { ParcelLine } from './shipping-charges.js';import { chargeableGramsForLines } from './shipping-charges.js';
 
 export type DelhiveryCreateShipmentInput = {
   orderNumber: string;
@@ -49,16 +49,18 @@ function shippingModeLabel(): string {
   return mot === 'E' || mot === 'EXPRESS' ? 'Express' : 'Surface';
 }
 
-function weightKgString(lines: ParcelLine[]): string {
+function weightGramsString(lines: ParcelLine[]): string {
   const grams = chargeableGramsForLines(lines);
-  const kg = Math.max(0.5, grams / 1000);
-  return kg.toFixed(2);
+  return String(Math.max(50, Math.round(grams)));
 }
 
 /**
  * Delhivery B2C shipment creation (manifestation).
- * POST /api/cmu/create.json
- * Body: format=json&data={ shipments, pickup_location }
+ *
+ * POST {base}/api/cmu/create.json
+ * Headers: Accept + Authorization Token + Content-Type application/json
+ * Body (exactly as Delhivery curl):
+ *   format=json&data={"shipments":[{...}],"pickup_location":{"name":"ODI Warehouse"}}
  */
 export async function createDelhiveryShipment(
   input: DelhiveryCreateShipmentInput
@@ -76,8 +78,10 @@ export async function createDelhiveryShipment(
 
   const pin = normalizePincode(input.pin);
   const waybill = input.waybill?.trim() ?? '';
+  const paymentMode = input.paymentMode === 'COD' ? 'COD' : 'Prepaid';
+  const labelAddr = delhiveryLabelAddressFromEnv();
 
-  const shipment: Record<string, string> = {
+  const shipment = {
     name: input.consigneeName.slice(0, 120),
     add: input.address.slice(0, 500),
     pin,
@@ -86,27 +90,25 @@ export async function createDelhiveryShipment(
     country: (input.country ?? 'India').slice(0, 40),
     phone: input.phone.replace(/\D/g, '').slice(0, 15),
     order: input.orderNumber,
-    payment_mode: input.paymentMode,
-    return_pin: '',
-    return_city: '',
-    return_phone: '',
-    return_add: '',
-    return_state: '',
-    return_country: '',
+    payment_mode: paymentMode,
+    return_pin: labelAddr.returnPin,
+    return_city: labelAddr.returnCity,
+    return_phone: labelAddr.returnPhone,
+    return_add: labelAddr.returnAddress,
+    return_state: labelAddr.returnState,
+    return_country: labelAddr.returnCountry,
     products_desc: input.productsDesc.slice(0, 500),
     hsn_code: '',
-    cod_amount: input.paymentMode === 'COD' ? String(Math.round(input.codAmountRupees ?? 0)) : '',
-    order_date: '',
+    cod_amount: paymentMode === 'COD' ? String(Math.round(input.codAmountRupees ?? 0)) : '',
+    order_date: null as string | null,
     total_amount: String(Math.round(input.totalAmountRupees)),
-    seller_add: '',
-    seller_name: '',
-    seller_inv: '',
-    quantity: String(Math.max(1, input.quantity)),
+    seller_add: labelAddr.sellerAddress,
+    seller_name: labelAddr.sellerName,
+    seller_inv: '',    quantity: String(Math.max(1, input.quantity)),
     waybill,
     shipment_width: String(maxDimension(input.lines, 'width_cm')),
     shipment_height: String(maxDimension(input.lines, 'height_cm')),
-    shipment_length: String(maxDimension(input.lines, 'length_cm')),
-    weight: weightKgString(input.lines),
+    weight: weightGramsString(input.lines),
     shipping_mode: shippingModeLabel(),
     address_type: '',
   };
@@ -116,7 +118,8 @@ export async function createDelhiveryShipment(
     pickup_location: { name: pickupName },
   };
 
-  const formBody = `format=json&data=${encodeURIComponent(JSON.stringify(payload))}`;
+  // Official curl: --data 'format=json&data={...}'  (JSON inside data is not extra-urlencoded)
+  const formBody = `format=json&data=${JSON.stringify(payload)}`;
   const url = `${getDelhiveryBaseUrl()}${DELHIVERY_API_PATHS.createShipment}`;
   const res = await fetchDelhiveryPost(url, formBody);
   const text = await res.text();
@@ -150,17 +153,33 @@ export async function createDelhiveryShipment(
         ? String(first.waybill)
         : waybill || null;
   const packageStatus = typeof first?.status === 'string' ? first.status : null;
-  const remarks =
-    typeof first?.remarks === 'string'
+  const packageRemarks = Array.isArray(first?.remarks)
+    ? first.remarks.filter((r): r is string => typeof r === 'string').join('; ')
+    : typeof first?.remarks === 'string'
       ? first.remarks
-      : typeof raw.rmk === 'string'
-        ? raw.rmk
-        : null;
+      : null;
+  const remarks =
+    packageRemarks ||
+    (typeof raw.rmk === 'string' ? raw.rmk : null);
+  const errCode = typeof first?.err_code === 'string' ? first.err_code : null;
 
   if (!success || !pkgWaybill) {
-    throw ApiError.internal('Delhivery shipment creation failed', {
+    const rmkText = `${remarks ?? ''} ${String(raw.rmk ?? '')}`;
+    let hint: string | undefined;
+    if (rmkText.includes('ClientWarehouse')) {
+      hint = `Invalid pickup location "${pickupName}". Set DELHIVERY_PICKUP_LOCATION_NAME to the exact warehouse name from Delhivery One (same token/environment as the Live API token).`;
+    } else if (errCode === 'ER0005' || rmkText.toLowerCase().includes('suspicious')) {
+      hint =
+        'Delhivery flagged this as a suspicious test consignee (ER0005). Use a real customer name + valid 10-digit mobile (not 9999999999). Live checkout with real address data should work.';
+    } else if (rmkText.toLowerCase().includes('insufficient balance')) {
+      hint =
+        'Delhivery wallet has insufficient balance to create a prepaid shipment. Top up the B2C account in Delhivery One (Billing / Wallet), then retry.';
+    }
+    throw ApiError.internal(hint ?? remarks ?? 'Delhivery shipment creation failed', {
       delhivery: raw,
       remarks,
+      errCode,
+      pickupLocation: pickupName,
     });
   }
 

@@ -91,10 +91,17 @@ export const env = {
     const productionBaseUrl =
       optional('DELHIVERY_PRODUCTION_BASE_URL') ?? 'https://track.delhivery.com';
 
-    const stagingToken =
-      optional('DELHIVERY_STAGING_TOKEN') ?? optional('DELHIVERY_API_KEY');
+    /** b2c (ODI Kids) vs b2b (legacy). JWT portal tokens are B2B — not valid for B2C Express. */
+    const accountType = (optional('DELHIVERY_ACCOUNT_TYPE') ?? 'b2c').toLowerCase() === 'b2b' ? 'b2b' : 'b2c';
+
+    const stagingTokenExplicit = optional('DELHIVERY_STAGING_TOKEN');
     const productionToken =
       optional('DELHIVERY_PRODUCTION_TOKEN') ?? optional('DELHIVERY_API_KEY');
+    // B2C often has no staging token. Staging QA uses a separate B2B JWT in DELHIVERY_STAGING_TOKEN.
+    const stagingToken =
+      stagingTokenExplicit ??
+      (accountType === 'b2c' ? productionToken : null) ??
+      optional('DELHIVERY_API_KEY');
     const apiKey = environment === 'production' ? productionToken : stagingToken;
 
     const originPin = optional('DELHIVERY_ORIGIN_PIN');
@@ -105,6 +112,24 @@ export const env = {
     const clientName = optional('DELHIVERY_CLIENT_NAME');
     /** Registered pickup location name in Delhivery One (warehouse). */
     const pickupLocationName = optional('DELHIVERY_PICKUP_LOCATION_NAME');
+    /** Warehouse details — only needed to register the pickup location via API. */
+    const warehouse = {
+      registeredName: optional('DELHIVERY_WAREHOUSE_REGISTERED_NAME'),
+      address: optional('DELHIVERY_WAREHOUSE_ADDRESS'),
+      city: optional('DELHIVERY_WAREHOUSE_CITY'),
+      state: optional('DELHIVERY_WAREHOUSE_STATE'),
+      phone: optional('DELHIVERY_WAREHOUSE_PHONE'),
+      email: optional('DELHIVERY_WAREHOUSE_EMAIL'),
+      /** Short return line for shipping label footer (omit city — use returnCity). */
+      returnAddress: optional('DELHIVERY_WAREHOUSE_RETURN_ADDRESS'),
+      returnCity: optional('DELHIVERY_WAREHOUSE_RETURN_CITY'),
+      returnState: optional('DELHIVERY_WAREHOUSE_RETURN_STATE'),
+      returnPin: optional('DELHIVERY_WAREHOUSE_RETURN_PIN'),
+      returnCountry: optional('DELHIVERY_WAREHOUSE_RETURN_COUNTRY'),
+    };
+
+    const labelPdfSizeRaw = (optional('DELHIVERY_LABEL_PDF_SIZE') ?? '4R').toUpperCase();
+    const labelPdfSize = labelPdfSizeRaw === 'A4' ? 'A4' : '4R';
 
     return {
       apiKey,
@@ -119,6 +144,10 @@ export const env = {
       pdt,
       clientName,
       pickupLocationName,
+      warehouse,
+      /** Delhivery Generate Shipping Label size: `4R` (4×6) or `A4` (8×11). Docs default A4; we default 4R for thermal. */
+      labelPdfSize: labelPdfSize as '4R' | 'A4',
+      accountType: accountType as 'b2c' | 'b2b',
       /** Resolved base URL for the active DELHIVERY_ENV. */
       baseUrl: (environment === 'production' ? productionBaseUrl : stagingBaseUrl).replace(
         /\/$/,

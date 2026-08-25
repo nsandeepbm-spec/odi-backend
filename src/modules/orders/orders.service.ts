@@ -22,7 +22,7 @@ export class OrdersService {
     const { data, error, count } = await supabase
       .from('orders')
       .select(
-        'id, order_number, status, subtotal_paise, discount_paise, shipping_paise, total_paise, currency, coupon_code, shipping_address, razorpay_order_id, paid_at, created_at, updated_at, order_items(id, snapshot_name, snapshot_slug, snapshot_image_url, quantity, unit_price_paise, line_total_paise)',
+        'id, order_number, status, subtotal_paise, discount_paise, shipping_paise, total_paise, currency, coupon_code, shipping_address, razorpay_order_id, paid_at, created_at, updated_at, delhivery_waybill, delhivery_status, delhivery_pickup_token, order_items(id, snapshot_name, snapshot_slug, snapshot_image_url, quantity, unit_price_paise, line_total_paise)',
         { count: 'exact' }
       )
       .eq('user_id', userId)

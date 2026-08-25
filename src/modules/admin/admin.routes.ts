@@ -138,6 +138,19 @@ router.get(
   })
 );
 
+/**
+ * GET /admin/pickups
+ * Needs schedule + scheduled pickup rows with date/time for admin Pickups page.
+ */
+router.get(
+  '/pickups',
+  asyncHandler(async (_req, res) => {
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    const data = await fulfillmentService.listPickupsForAdmin();
+    res.json({ success: true, data });
+  })
+);
+
 /** GET /admin/orders/:id — full order detail with user profile */
 router.get(
   '/orders/:id',
@@ -161,7 +174,7 @@ router.patch(
   })
 );
 
-/** POST /admin/orders/:id/shipment — Delhivery manifest (fetch waybill + create). */
+/** POST /admin/orders/:id/shipment — internal/retry only (auto-runs after payment). */
 router.post(
   '/orders/:id/shipment',
   asyncHandler(async (req, res) => {
@@ -171,13 +184,80 @@ router.post(
   })
 );
 
-/** POST /admin/orders/:id/pickup — Delhivery pickup request (not implemented yet). */
+/**
+ * GET /admin/orders/:id/packing-slip
+ * Delhivery packing slip JSON for the order waybill (for custom shipping label PDF).
+ */
+router.get(
+  '/orders/:id/packing-slip',
+  asyncHandler(async (req, res) => {
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    const data = await fulfillmentService.getPackingSlipForOrder(param(req.params.id, 'id'));
+    res.json({ success: true, data });
+  })
+);
+
+/**
+ * GET /admin/orders/:id/shipping-label
+ * Official Delhivery Generate Shipping Label PDF
+ * (GET /api/p/packing_slip?wbns=…&pdf=true&pdf_size=4R).
+ * Docs: pdf_size=4R (4×6) or A4 (8×11). Admin UI renders custom 4R from packing-slip JSON.
+ * @see https://one.delhivery.com/developer-portal/document/b2c/detail/generate-shipping-label
+ */
+router.get(
+  '/orders/:id/shipping-label',
+  asyncHandler(async (req, res) => {
+    const { env } = await import('../../config/env.js');
+    const rawSize =
+      typeof req.query.pdfSize === 'string' ? req.query.pdfSize.trim().toUpperCase() : env.delhivery.labelPdfSize;
+    const pdfSize = (rawSize === 'A4' ? 'A4' : '4R') as '4R' | 'A4';
+
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    const label = await fulfillmentService.getShippingLabelPdfForOrder(param(req.params.id, 'id'), {
+      pdfSize,
+    });
+
+    const filename = `Delhivery-Label-${label.waybill}.pdf`;
+    res.setHeader('Content-Type', label.contentType || 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-ODI-Label-Source', label.sourceUrl ? 'delhivery-url' : 'delhivery-bytes');
+    res.send(label.bytes);
+  })
+);
+
+/**
+ * GET /admin/orders/:id/tracking
+ * Live Delhivery shipment status + scan history.
+ */
+router.get(
+  '/orders/:id/tracking',
+  asyncHandler(async (req, res) => {
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    const tracking = await fulfillmentService.getTrackingForOrder(param(req.params.id, 'id'));
+    res.json({ success: true, data: { tracking } });
+  })
+);
+
+const pickupBodySchema = z
+  .object({
+    pickupDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    pickupTime: z.string().regex(/^\d{2}:\d{2}:\d{2}$/).optional(),
+    packageCount: z.number().int().positive().max(500).optional(),
+  })
+  .strict();
+
+/** POST /admin/orders/:id/pickup — manual Delhivery pickup request. */
 router.post(
   '/orders/:id/pickup',
-  asyncHandler(async (_req, res) => {
-    throw ApiError.badRequest(
-      'Delhivery pickup request API is not implemented yet. Shipment is created automatically after payment.'
-    );
+  asyncHandler(async (req, res) => {
+    const parsed = pickupBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid pickup request', parsed.error.flatten().fieldErrors);
+    }
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    const result = await fulfillmentService.requestPickupForOrder(param(req.params.id, 'id'), parsed.data);
+    res.json({ success: true, data: { order: result.order } });
   })
 );
 
