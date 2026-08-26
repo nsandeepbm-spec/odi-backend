@@ -1,6 +1,6 @@
 import { supabase } from '../../config/supabase.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { verifyPaymentSignature, verifyWebhookSignature } from '../../lib/razorpay.js';
+import { getRazorpayAccountSnapshot, verifyPaymentSignature, verifyWebhookSignature } from '../../lib/razorpay.js';
 import { env } from '../../config/env.js';
 
 export class PaymentsService {
@@ -202,14 +202,16 @@ export class PaymentsService {
   }
 
   async handleWebhook(rawBody: string, signature: string | undefined, parsed: Record<string, unknown>) {
+    if (!env.razorpay.webhookSecret) {
+      throw ApiError.badRequest(
+        'RAZORPAY_WEBHOOK_SECRET is not set. Create the webhook at RAZORPAY_WEBHOOK_URL in Razorpay Dashboard and paste that secret here.'
+      );
+    }
     if (!signature) throw ApiError.badRequest('Missing x-razorpay-signature');
 
     const valid = verifyWebhookSignature(rawBody, signature);
-    if (!valid && env.isProd) {
+    if (!valid) {
       throw ApiError.forbidden('Invalid webhook signature');
-    }
-    if (!valid && !env.isProd) {
-      console.warn('[payments] webhook signature invalid — allowing in non-production');
     }
 
     const event = String(parsed.event ?? '');
@@ -275,6 +277,7 @@ export class PaymentsService {
     return {
       payments: payments ?? [],
       kpis: { collectedPaise, pendingPaise, refundedPaise },
+      razorpay: getRazorpayAccountSnapshot(),
       meta: paginationMeta(count ?? 0, p, pp),
     };
   }

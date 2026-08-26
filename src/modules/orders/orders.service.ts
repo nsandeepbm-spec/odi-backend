@@ -12,6 +12,41 @@ const ADMIN_STATUSES = [
   'refunded',
 ] as const;
 
+async function latestRefundByOrderIds(orderIds: string[]) {
+  const map = new Map<
+    string,
+    { status: string; provider_refund_id: string | null }
+  >();
+  if (!orderIds.length) return map;
+
+  const { data } = await supabase
+    .from('refunds')
+    .select('order_id, status, provider_refund_id, created_at')
+    .in('order_id', orderIds)
+    .order('created_at', { ascending: false });
+
+  for (const row of data ?? []) {
+    const id = row.order_id as string;
+    if (map.has(id)) continue;
+    map.set(id, {
+      status: row.status as string,
+      provider_refund_id: (row.provider_refund_id as string | null) ?? null,
+    });
+  }
+  return map;
+}
+
+function withRefundFields(
+  order: Record<string, unknown>,
+  refund?: { status: string; provider_refund_id: string | null }
+) {
+  return {
+    ...order,
+    refund_status: refund?.status ?? null,
+    razorpay_refund_id: refund?.provider_refund_id ?? null,
+  };
+}
+
 export class OrdersService {
   async listForUser(userId: string, page = 1, perPage = 20) {
     const p = clampPage(page);
@@ -30,7 +65,12 @@ export class OrdersService {
       .range(from, to);
 
     if (error) throw error;
-    return { orders: data ?? [], meta: paginationMeta(count ?? 0, p, pp) };
+    const orders = data ?? [];
+    const refunds = await latestRefundByOrderIds(orders.map((o) => o.id as string));
+    return {
+      orders: orders.map((o) => withRefundFields(o as Record<string, unknown>, refunds.get(o.id as string))),
+      meta: paginationMeta(count ?? 0, p, pp),
+    };
   }
 
   async getForUser(userId: string, orderId: string) {
@@ -57,7 +97,12 @@ export class OrdersService {
       .eq('order_id', orderId)
       .order('created_at', { ascending: false });
 
-    return { order, items: items ?? [], payments: payments ?? [] };
+    const refunds = await latestRefundByOrderIds([orderId]);
+    return {
+      order: withRefundFields(order as Record<string, unknown>, refunds.get(orderId)),
+      items: items ?? [],
+      payments: payments ?? [],
+    };
   }
 
   async listAdmin(page = 1, perPage = 20, status?: string) {
@@ -114,6 +159,11 @@ export class OrdersService {
     if (!ADMIN_STATUSES.includes(status as (typeof ADMIN_STATUSES)[number])) {
       throw ApiError.badRequest('Invalid order status');
     }
+    if (status === 'cancelled' || status === 'refunded') {
+      throw ApiError.badRequest(
+        'Use Cancel Management to cancel and Refund Management to refund. Direct status change is not saved.'
+      );
+    }
 
     const { data: existing, error: findErr } = await supabase
       .from('orders')
@@ -132,6 +182,7 @@ export class OrdersService {
       .single();
 
     if (error) throw error;
+    if (!data) throw ApiError.internal('Order status was not saved');
 
     if (existing.status !== status) {
       await this.notifyStatusChange(data);

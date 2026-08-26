@@ -24,7 +24,7 @@ npm run dev              # http://localhost:5000
    - `MAIL_FROM=ODI <odistudio24@gmail.com>`
    - `SMTP_USER=odistudio24@gmail.com`
    - `SMTP_PASS=<app-password>`
-   - `FRONTEND_URL=` your site (localhost or ngrok URL for CTA links)
+   - `FRONTEND_URL=` your site (`http://localhost:5173` locally, `https://odi.studio` in production)
 
 Without `SMTP_PASS`, the API still runs and logs emails to the console.
 
@@ -160,9 +160,12 @@ Response shape: `{ success, data }` or `{ success: false, error: { message } }`.
 | DELETE | `/cart/items/:productId` | Bearer | Remove item |
 | POST | `/coupons/validate` | Bearer | Preview discount `{ code, items? }` |
 | POST | `/checkout/sessions` | Bearer + `Idempotency-Key` | Create pending order + Razorpay order (validates Delhivery PIN) |
-| GET | `/orders` | Bearer | My orders |
+| GET | `/orders` | Bearer | My orders (`refund_status`, `razorpay_refund_id`) |
 | GET | `/orders/:id` | Bearer | Order detail + items + payments |
 | GET | `/orders/:id/tracking` | Bearer | Live Delhivery status + scans (owner) |
+| GET | `/orders/:id/cancel` | Bearer | Latest cancel request (owner) |
+| POST | `/orders/:id/cancel` | Bearer | Create cancel request |
+| GET | `/orders/:id/refund` | Bearer | Latest refund request (owner) |
 | POST | `/payments/webhook` | Razorpay signature | Mark paid (idempotent) |
 | POST | `/payments/verify` | Bearer | Client signature verify after Checkout |
 | GET | `/shipping/pincode/:pincode` | none | Delhivery pin-code serviceability |
@@ -234,6 +237,11 @@ All product responses use the same serializer (`products.presenter.ts`).
 | POST | `/admin/orders/:id/pickup` | Admin | Manual Delhivery pickup request |
 | GET | `/admin/payments` | Admin | Payment list + KPIs |
 | GET | `/admin/payments/:id` | Admin | Payment detail + linked order + user |
+| GET | `/admin/cancels` | Admin | Cancel Management list |
+| PATCH | `/admin/cancels/:id` | Admin | Approve (Delhivery cancel + queue refund) / reject |
+| GET | `/admin/refunds` | Admin | Refund Management list |
+| GET | `/admin/refunds/:id` | Admin | Refund request detail |
+| PATCH | `/admin/refunds/:id` | Admin | Approve = Razorpay `POST /v1/payments/:id/refund` (amount in paise); reject closes without payout |
 | GET | `/admin/support-tickets` | Admin | Customer support tickets |
 | PATCH | `/admin/support-tickets/:id` | Admin | Update ticket status / note |
 | GET | `/admin/contact-inquiries` | Admin | Public contact form submissions |
@@ -290,9 +298,26 @@ POST /checkout/sessions  → pending order + Razorpay order (prices from DB)
 Frontend Razorpay modal  → customer pays
 POST /payments/verify    → HMAC check → mark paid + decrement stock
   and/or
-POST /payments/webhook   → same idempotent mark-paid path
+POST /payments/webhook   → same idempotent mark-paid path (requires RAZORPAY_WEBHOOK_SECRET)
 GET  /orders/:id         → poll status
 ```
+
+### Razorpay webhook (required)
+
+Razorpay calls **one public URL** — `RAZORPAY_WEBHOOK_URL` (default `https://odi.studio/payments/webhook`). It cannot reach `localhost`. Local checkout still confirms via `POST /payments/verify` after the Razorpay modal.
+
+`RAZORPAY_WEBHOOK_SECRET` is **not invented in `.env`**. Create the webhook in the Razorpay Dashboard, then paste the secret Razorpay shows into `.env`. HMAC is always verified (invalid signature is rejected).
+
+**Create it**
+
+1. [Razorpay Dashboard](https://dashboard.razorpay.com/) → **Test Mode** or **Live Mode** (must match `RAZORPAY_KEY_ID`: `rzp_test_` vs `rzp_live_`).
+2. **Account & Settings → Webhooks → Add New Webhook**.
+3. **URL:** `https://odi.studio/payments/webhook` (same URL for Test and Live). Production must reverse-proxy `/payments` to this Express API.
+4. **Secret:** copy the secret Razorpay generates → paste as `RAZORPAY_WEBHOOK_SECRET` in `.env`.
+5. Events: `payment.captured`, `order.paid`, `payment.failed`, `refund.processed`, `refund.failed`.
+6. Restart the API. Use **Send test event** in the dashboard; logs should show `POST /payments/webhook 200`.
+
+**Refunds vs Collected:** Admin Payments **Collected** is the sum of captured rows in our DB. Razorpay pays refunds from merchant **Available balance / refund credits**, which is often ₹0 in Test Mode until more test payments settle.
 
 ## Project structure
 

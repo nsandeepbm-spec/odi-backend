@@ -43,6 +43,15 @@ router.get(
   })
 );
 
+/** GET /orders/:id/refund — latest refund for this order (owner) */
+router.get(
+  '/:id/refund',
+  asyncHandler(async (req, res) => {
+    const refund = await cancelsService.getRefundForOrderUser(req.user!.id, param(req.params.id));
+    res.json({ success: true, data: { refund } });
+  })
+);
+
 /** POST /orders/:id/cancel — user cancel request */
 router.post(
   '/:id/cancel',

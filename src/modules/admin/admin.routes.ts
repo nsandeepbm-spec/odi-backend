@@ -455,7 +455,17 @@ router.get(
   })
 );
 
-/** PATCH /admin/refunds/:id — approve / reject / completed (Razorpay on completed) */
+/** GET /admin/refunds/:id — refund request + customer (admin then loads order by orderId) */
+router.get(
+  '/refunds/:id',
+  asyncHandler(async (req, res) => {
+    const { cancelsService } = await import('../cancels/cancels.service.js');
+    const refund = await cancelsService.getRefundAdmin(param(req.params.id));
+    res.json({ success: true, data: { refund } });
+  })
+);
+
+/** PATCH /admin/refunds/:id — approve/completed runs Razorpay refund; reject closes without payout */
 router.patch(
   '/refunds/:id',
   asyncHandler(async (req, res) => {

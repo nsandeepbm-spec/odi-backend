@@ -34,11 +34,12 @@ src/modules/
 ├── cart/          server-side cart
 ├── coupons/       POST /coupons/validate
 ├── checkout/      POST /checkout/sessions
-├── orders/        GET /orders, /orders/:id
+├── orders/        GET /orders, /orders/:id, /orders/:id/cancel, /orders/:id/refund
 ├── payments/      webhook + verify + mark-paid
 ├── shipping/      Delhivery pincode, TAT, and shipping charges
 ├── fulfillment/   Delhivery waybill + shipment creation (auto after pay)
-└── admin/         /admin/products, /admin/orders
+├── cancels/       cancel + refund services (mounted on /orders and /admin)
+└── admin/         /admin/products, /admin/orders, /admin/cancels, /admin/refunds
 ```
 
 Shared helpers: `src/lib/{pagination,money,razorpay,params,productImages,mailer}.ts`.
@@ -102,6 +103,8 @@ Webhook:    Razorpay HMAC (raw body on /payments/webhook)
 | `orders` | status machine + money + shipping jsonb + idempotency_key |
 | `order_items` | price/name/slug/image snapshots |
 | `payments` | razorpay ids + status |
+| `cancels` | user cancel requests; approve → Delhivery cancel + queue refund |
+| `refunds` | queued after approved cancel; admin approve → Razorpay `POST /v1/payments/:id/refund` (`amount` in paise) |
 
 Order status: `pending → paid → processing → shipped → delivered` (also `cancelled` / `refunded`).
 
@@ -111,7 +114,7 @@ Order status: `pending → paid → processing → shipped → delivered` (also 
 
 Required: `FIREBASE_PROJECT_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
-Payments: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`.
+Payments: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_URL` (`https://odi.studio/payments/webhook`), `RAZORPAY_WEBHOOK_SECRET` (paste from Razorpay Dashboard — do not invent).
 
 Optional: `SUPABASE_STORAGE_BUCKET=product-images`, `TRUST_PROXY`, `CORS_ORIGIN`, `FRONTEND_URL`, `MAIL_FROM`, `SMTP_*` (Gmail App Password for `odistudio24@gmail.com`).
 
