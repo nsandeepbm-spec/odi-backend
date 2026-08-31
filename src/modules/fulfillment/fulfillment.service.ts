@@ -429,7 +429,13 @@ export class FulfillmentService {
     });
   }
 
-  private async notifyShipped(order: { id: string; user_id: string; order_number: string }) {
+  private async notifyShipped(order: {
+    id: string;
+    user_id: string;
+    order_number: string;
+    delhivery_waybill?: string | null;
+    shipping_address?: unknown;
+  }) {
     const { notificationsService } = await import('../notifications/notifications.service.js');
     await notificationsService.safeCreate({
       userId: order.user_id,
@@ -439,6 +445,8 @@ export class FulfillmentService {
       link: `/dashboard/orders/${order.id}`,
       metadata: { order_id: order.id, order_number: order.order_number, status: 'shipped' },
     });
+    const { sendOrderShippedEmailForOrder } = await import('../../lib/mailer/index.js');
+    sendOrderShippedEmailForOrder(order);
   }
 }
 

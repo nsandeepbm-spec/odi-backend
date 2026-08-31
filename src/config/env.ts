@@ -29,6 +29,34 @@ const parseTrustProxy = (value: string | undefined): boolean | number => {
   return hops;
 };
 
+/** Fail fast if someone pasted a Delhivery/Razorpay token into the Supabase slot. */
+const supabaseServiceRoleKey = (() => {
+  const key = required('SUPABASE_SERVICE_ROLE_KEY');
+  const parts = key.split('.');
+  if (parts.length < 2) {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY is not a JWT. Paste service_role from Supabase Dashboard → Project Settings → API.'
+    );
+  }
+  try {
+    const json = Buffer.from(parts[1], 'base64url').toString('utf8');
+    const payload = JSON.parse(json) as { role?: string; ref?: string; tenant?: string };
+    if (payload.role !== 'service_role') {
+      throw new Error(
+        'SUPABASE_SERVICE_ROLE_KEY is not a Supabase service_role key ' +
+          `(got ${payload.role ? `role=${payload.role}` : payload.tenant ? `tenant=${payload.tenant}` : 'unknown token'}). ` +
+          'Copy service_role from Supabase Dashboard → Project Settings → API — not a Delhivery token.'
+      );
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('SUPABASE_SERVICE_ROLE_KEY')) throw err;
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY is not a valid JWT. Paste service_role from Supabase Dashboard → Project Settings → API.'
+    );
+  }
+  return key;
+})();
+
 export const env = {
   port,
   nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -40,14 +68,14 @@ export const env = {
     .map((o) => o.trim())
     .filter(Boolean),
 
-  firebase: {
-    projectId: required('FIREBASE_PROJECT_ID'),
-    serviceAccountPath: process.env.FIREBASE_SERVICE_ACCOUNT_PATH ?? null,
-  },
+    firebase: {
+      projectId: required('FIREBASE_PROJECT_ID'),
+      serviceAccountPath: optional('FIREBASE_SERVICE_ACCOUNT_PATH'),
+    },
 
   supabase: {
     url: required('SUPABASE_URL'),
-    serviceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
+    serviceRoleKey: supabaseServiceRoleKey,
     storageBucket: process.env.SUPABASE_STORAGE_BUCKET ?? 'product-images',
   },
 
@@ -68,14 +96,6 @@ export const env = {
 
   mail: {
     from: optional('MAIL_FROM') ?? 'ODI <odistudio24@gmail.com>',
-    /** Absolute HTTPS logo URL for email clients (Supabase Storage recommended). */
-    logoUrl:
-      optional('MAIL_LOGO_URL') ??
-      'https://joiezvghtlyeyhuyvnwl.supabase.co/storage/v1/object/public/product-images/brand/odi-email-logo.png',
-    instagramUrl: optional('MAIL_INSTAGRAM_URL'),
-    linkedinUrl: optional('MAIL_LINKEDIN_URL'),
-    youtubeUrl: optional('MAIL_YOUTUBE_URL'),
-    facebookUrl: optional('MAIL_FACEBOOK_URL'),
     smtp: {
       host: optional('SMTP_HOST') ?? 'smtp.gmail.com',
       port: Number(process.env.SMTP_PORT ?? 465),

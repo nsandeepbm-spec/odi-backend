@@ -22,7 +22,7 @@ Express 5 + TypeScript + Firebase Admin (token verify) + Supabase (Postgres, ser
 src/modules/
 ├── auth/          POST /auth/sync
 ├── user/          GET/PATCH /user/me + /user/addresses/* + /user/favorites/* + /user/reviews
-├── users/         GET /users (admin) + shared users.service
+├── users/         GET/PATCH/DELETE /users (admin) + shared users.service
 ├── addresses/     address CRUD service
 ├── favorites/     wishlist CRUD service
 ├── notify-me/     product launch waitlist (“Notify Me”)
@@ -48,7 +48,7 @@ SQL: single file `sql/schema.sql` (users + commerce; image `kind` = `card` / `ga
 
 Products API: thin routes → Zod schemas → service → **`products.presenter.ts`** (stable DTO for admin + public).
 
-Transactional email (Gmail SMTP): welcome on first `/auth/sync`, order placed on new checkout session, product-live from waitlist. Templates live under `src/lib/mailer/`. Without `SMTP_PASS`, sends are logged to console.
+Transactional email (Gmail SMTP): welcome on first `/auth/sync`, order placed after payment/COD, shipped, delivered, cancelled, product-live from waitlist, refund processed, support reply. Templates live under `src/lib/mailer/`. They share the black navbar/footer shell. Without `SMTP_PASS`, sends are logged to console.
 
 ---
 

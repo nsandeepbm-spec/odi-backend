@@ -84,38 +84,16 @@ function failDb(context: string, error: DbError): never {
 }
 
 async function restoreStockForOrder(orderId: string) {
-  const { data: items, error } = await supabase
-    .from('order_items')
-    .select('product_id, quantity')
-    .eq('order_id', orderId);
-  if (error) failDb('Could not load order items to restore stock', error);
-
-  for (const item of items ?? []) {
-    if (!item.product_id) continue;
-    const { data: product, error: prodErr } = await supabase
-      .from('products')
-      .select('stock_qty')
-      .eq('id', item.product_id)
-      .maybeSingle();
-    if (prodErr) failDb('Could not load product stock', prodErr);
-    if (!product) continue;
-    const next = (product.stock_qty as number) + (item.quantity as number);
-    const { data: saved, error: updErr } = await supabase
-      .from('products')
-      .update({ stock_qty: next })
-      .eq('id', item.product_id)
-      .select('id')
-      .maybeSingle();
-    if (updErr) failDb('Could not restore product stock', updErr);
-    if (!saved) failDb('Could not restore product stock', { message: 'product row was not updated' });
-  }
+  const { applyStockDeltaForOrder } = await import('../../lib/stock.js');
+  await applyStockDeltaForOrder(orderId, 'increment');
 }
 
 async function notifyCustomerOrder(
   userId: string,
   orderId: string,
   orderNumber: string,
-  kind: 'cancelled' | 'refunded'
+  kind: 'cancelled' | 'refunded',
+  queuedRefund = true
 ) {
   const { notificationsService } = await import('../notifications/notifications.service.js');
   await notificationsService.safeCreate({
@@ -124,7 +102,9 @@ async function notifyCustomerOrder(
     title: kind === 'cancelled' ? 'Order cancelled' : 'Refund sent',
     body:
       kind === 'cancelled'
-        ? `Order ${orderNumber} was cancelled. Your refund is being processed.`
+        ? queuedRefund
+          ? `Order ${orderNumber} was cancelled. Your refund is being processed.`
+          : `Order ${orderNumber} was cancelled.`
         : `Order ${orderNumber} refund has been sent to your original payment method.`,
     link: `/dashboard/orders/${orderId}`,
     metadata: { order_id: orderId, order_number: orderNumber },
@@ -136,15 +116,19 @@ export class CancelsService {
   async createForUser(userId: string, orderId: string, reason: string) {
     const { data: order, error } = await supabase
       .from('orders')
-      .select('id, order_number, user_id, status, total_paise, delhivery_waybill')
+      .select('id, order_number, user_id, status, total_paise, delhivery_waybill, razorpay_order_id')
       .eq('id', orderId)
       .maybeSingle();
     if (error) throw error;
     if (!order || order.user_id !== userId) throw ApiError.notFound('Order not found');
 
-    const blocked = ['cancelled', 'refunded', 'delivered', 'pending'];
+    const blocked = ['cancelled', 'refunded', 'delivered'];
     if (blocked.includes(order.status as string)) {
       throw ApiError.badRequest(`Cannot cancel order in status "${order.status}"`);
+    }
+    // Unpaid Razorpay checkout — not a placed order yet.
+    if (order.status === 'pending' && order.razorpay_order_id) {
+      throw ApiError.badRequest('Cannot cancel an unpaid online order');
     }
 
     const { data: existingPending, error: pendingErr } = await supabase
@@ -264,7 +248,7 @@ export class CancelsService {
 
     const { data: currentOrder, error: orderReadErr } = await supabase
       .from('orders')
-      .select('id, status, user_id, order_number')
+      .select('id, status, user_id, order_number, created_at, total_paise')
       .eq('id', row.order_id)
       .maybeSingle();
     if (orderReadErr) failDb('Could not load order', orderReadErr);
@@ -338,6 +322,7 @@ export class CancelsService {
       .maybeSingle();
     if (openRefundErr) failDb('Could not check existing refund', openRefundErr);
 
+    let queuedRefund = Boolean(openRefund);
     if (!openRefund && (row.amount_paise as number) > 0) {
       const { data: payment, error: payReadErr } = await supabase
         .from('payments')
@@ -349,26 +334,30 @@ export class CancelsService {
         .maybeSingle();
       if (payReadErr) failDb('Could not load payment for refund', payReadErr);
 
-      const refundAmount =
-        typeof payment?.amount_paise === 'number' && payment.amount_paise > 0
-          ? payment.amount_paise
-          : (row.amount_paise as number);
+      // COD / unpaid rows have no captured payment — do not queue a Razorpay refund.
+      if (payment) {
+        queuedRefund = true;
+        const refundAmount =
+          typeof payment.amount_paise === 'number' && payment.amount_paise > 0
+            ? payment.amount_paise
+            : (row.amount_paise as number);
 
-      const { error: refundErr } = await supabase.from('refunds').insert({
-        order_id: row.order_id,
-        user_id: row.user_id,
-        cancel_id: row.id,
-        payment_id: payment?.id ?? null,
-        order_number: row.order_number,
-        amount_paise: refundAmount,
-        currency: 'INR',
-        reason: `Refund after approved cancel: ${row.reason}`,
-        status: 'pending',
-        provider: payment?.provider ?? 'razorpay',
-        provider_payment_id: payment?.provider_payment_id ?? null,
-      });
-      if (refundErr && refundErr.code !== '23505') {
-        failDb('Order cancelled but refund request was not saved', refundErr);
+        const { error: refundErr } = await supabase.from('refunds').insert({
+          order_id: row.order_id,
+          user_id: row.user_id,
+          cancel_id: row.id,
+          payment_id: payment.id,
+          order_number: row.order_number,
+          amount_paise: refundAmount,
+          currency: 'INR',
+          reason: `Refund after approved cancel: ${row.reason}`,
+          status: 'pending',
+          provider: payment.provider ?? 'razorpay',
+          provider_payment_id: payment.provider_payment_id ?? null,
+        });
+        if (refundErr && refundErr.code !== '23505') {
+          failDb('Order cancelled but refund request was not saved', refundErr);
+        }
       }
     }
 
@@ -396,8 +385,33 @@ export class CancelsService {
       String(row.user_id),
       String(row.order_id),
       String(row.order_number),
-      'cancelled'
+      'cancelled',
+      queuedRefund
     );
+
+    const { data: customer } = await supabase
+      .from('users')
+      .select('email')
+      .eq('id', row.user_id)
+      .maybeSingle();
+    const to = typeof customer?.email === 'string' ? customer.email : null;
+    if (to) {
+      const { count } = await supabase
+        .from('order_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('order_id', row.order_id);
+      const { sendOrderCancelledEmail } = await import('../../lib/mailer/index.js');
+      sendOrderCancelledEmail({
+        to,
+        orderId: String(row.order_id),
+        orderNumber: String(row.order_number),
+        amountPaise: Math.trunc(Number(row.amount_paise)),
+        reason: typeof row.reason === 'string' ? row.reason : null,
+        itemCount: count ?? 0,
+        placedAt: (currentOrder.created_at as string | null) ?? null,
+        queuedRefund,
+      });
+    }
 
     return serializeCancel(updated as Record<string, unknown>);
   }
@@ -605,6 +619,24 @@ export class CancelsService {
       String(row.order_number),
       'refunded'
     );
+
+    const { data: customer } = await supabase
+      .from('users')
+      .select('email')
+      .eq('id', row.user_id)
+      .maybeSingle();
+    const to = typeof customer?.email === 'string' ? customer.email : null;
+    if (to) {
+      const { sendRefundProcessedEmail } = await import('../../lib/mailer/index.js');
+      sendRefundProcessedEmail({
+        to,
+        orderId: String(row.order_id),
+        orderNumber: String(row.order_number),
+        amountPaise: Math.trunc(Number(row.amount_paise)),
+        processedAt: refundedAt ?? now,
+        provider: provider,
+      });
+    }
 
     return serializeRefund(updated as Record<string, unknown>);
   }

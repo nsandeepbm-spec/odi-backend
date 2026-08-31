@@ -31,7 +31,10 @@ export function verifyPaymentSignature(params: {
     .createHmac('sha256', env.razorpay.keySecret)
     .update(body)
     .digest('hex');
-  return expected === params.signature;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(params.signature);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 export function verifyWebhookSignature(rawBody: string, signature: string): boolean {

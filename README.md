@@ -6,7 +6,7 @@ TypeScript Express API for the ODI Kids storefront + dashboards.
 - **Database:** Supabase (Postgres) via service-role key. RLS blocks direct client access.
 - **Payments:** Razorpay (test or live keys). Orders are confirmed via signed webhook or client verify.
 - **Shipping:** Delhivery Express (staging by default). Pin-code serviceability via `GET /shipping/pincode/:pincode`; expected TAT via `GET /shipping/tat/:destinationPin`; shipping cost via `GET /shipping/charges/:destinationPin`.
-- **Email:** Gmail SMTP (`odistudio24@gmail.com`) — welcome, order placed, product-live. Set `SMTP_PASS` to a Google App Password.
+- **Email:** Gmail SMTP (`odistudio24@gmail.com`) — welcome, order placed, shipped, delivered, cancelled, refund processed, product-live, support reply. Set `SMTP_PASS` to a Google App Password.
 
 ## Setup
 
@@ -26,7 +26,20 @@ npm run dev              # http://localhost:5000
    - `SMTP_PASS=<app-password>`
    - `FRONTEND_URL=` your site (`http://localhost:5173` locally, `https://odi.studio` in production)
 
+Logo and Instagram / Facebook / LinkedIn / YouTube links live in `src/lib/mailer/brand.ts` (public brand assets, not secrets). Do not put those URLs in `.env`.
+
 Without `SMTP_PASS`, the API still runs and logs emails to the console.
+
+### Firebase (permanent customer delete)
+
+Token verify only needs `FIREBASE_PROJECT_ID`. To **delete** a customer so they cannot sign in again, the API must call Firebase Auth Admin (`deleteUser`). That needs a service account:
+
+1. [Firebase Console](https://console.firebase.google.com/) → Project settings → **Service accounts** → **Generate new private key**.
+2. Save the JSON as `odi-backend/firebase-service-account.json` (gitignored).
+3. In `.env`: `FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json`
+4. Restart the API.
+
+Admin **Customers → Edit → Delete** then removes Firebase login and the Supabase row. If the customer has orders, the row is **banned** instead (order history stays).
 
 ### Delhivery (shipping)
 
@@ -96,6 +109,8 @@ Run **`sql/schema.sql`** — single source of truth for users + commerce (produc
 
 **Warning:** re-running drops and recreates commerce tables (wipes catalog/orders). Safe on empty projects only. Do not re-run on a live DB that already has data.
 
+**Existing databases:** copy **`sql/stock-functions.sql`** into the Supabase SQL Editor and Run. `CREATE OR REPLACE` is safe — it does not drop tables. Checkout uses these for atomic stock; without them the API falls back to a non-atomic update.
+
 After first sign-in, promote yourself:
 
 ```sql
@@ -146,6 +161,8 @@ Response shape: `{ success, data }` or `{ success: false, error: { message } }`.
 | POST | `/user/support-tickets` | Bearer | Create support ticket |
 | GET | `/user/reviews` | Bearer | List signed-in user's reviews |
 | GET | `/users` | Admin | List customers |
+| PATCH | `/users/:id` | Admin | Update role / status |
+| DELETE | `/users/:id` | Admin | Delete Firebase login + profile (or ban if they have orders) |
 | GET | `/products` | — | Catalog (`?category=&q=&page=&perPage=`) |
 | GET | `/products/:slug` | — | Product + images + rating summary |
 | GET | `/products/:slug/reviews` | — | Paginated reviews |
@@ -173,6 +190,11 @@ Response shape: `{ success, data }` or `{ success: false, error: { message } }`.
 | GET | `/shipping/charges/:destinationPin` | none | Delhivery shipping cost (`?slug&quantity`) |
 | POST | `/contact` | none | Save contact / service inquiry (no email) |
 | POST | `/careers` | none | Save career application (no email) |
+| POST | `/admin/mail/welcome` | Admin | Send welcome email (`{ to?, sent, mode }`) |
+| POST | `/admin/mail/refund` | Admin | Send refund email (`{ to?, orderNumber?, amountPaise?, sent, mode }`) |
+| POST | `/admin/mail/order` | Admin | Send order-placed email (`{ to?, sent, mode }`) |
+| POST | `/admin/mail/product-live` | Admin | Send product-live email (`{ to?, sent, mode }`) |
+| POST | `/admin/mail/cancel` | Admin | Send order-cancelled email (`{ to?, sent, mode }`) |
 | GET | `/admin/overview` | Admin | KPIs, revenue series, catalog snapshot, recent orders |
 | GET | `/admin/products` | Admin | Catalog list (`?page&perPage&status&q`) |
 | GET | `/admin/products/:id` | Admin | Single product (editor) |
@@ -291,12 +313,16 @@ Firebase sign-in
   → GET /user/me (later calls)
 ```
 
+Deleting the Supabase `users` row is **not** a full delete. Firebase Auth is the login. `POST /auth/sync` inserts a new profile if the Firebase user still exists. Use admin `DELETE /users/:id` (needs `FIREBASE_SERVICE_ACCOUNT_PATH`) or delete the user in Firebase Console → Authentication as well.
+
 ## Checkout / payment flow
 
 ```
-POST /checkout/sessions  → pending order + Razorpay order (prices from DB)
-Frontend Razorpay modal  → customer pays
-POST /payments/verify    → HMAC check → mark paid + decrement stock
+POST /checkout/sessions  → pending order
+  razorpay: Razorpay order only (no email / stock / cart clear yet)
+  cod:      reserve stock + email + clear cart + Delhivery COD shipment
+Frontend Razorpay modal  → customer pays (UPI / card / netbanking inside Razorpay)
+POST /payments/verify    → HMAC (timing-safe) + amount check → mark paid + stock + email + clear cart
   and/or
 POST /payments/webhook   → same idempotent mark-paid path (requires RAZORPAY_WEBHOOK_SECRET)
 GET  /orders/:id         → poll status
@@ -345,7 +371,8 @@ src/
 │   └── admin/
 └── utils/
 sql/
-└── schema.sql   # full DB schema (run once in Supabase SQL Editor)
+├── schema.sql          # full DB schema (run once in Supabase SQL Editor)
+└── stock-functions.sql # existing DBs: paste into SQL Editor for atomic stock RPCs
 ```
 
 ## Scripts

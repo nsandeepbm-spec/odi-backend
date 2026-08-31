@@ -40,6 +40,96 @@ const statusSchema = z
   })
   .strict();
 
+/** POST /admin/mail/welcome — send the registration welcome template (SMTP test). */
+router.post(
+  '/mail/welcome',
+  asyncHandler(async (req, res) => {
+    const parsed = z
+      .object({ to: z.string().email().optional() })
+      .strict()
+      .safeParse(req.body ?? {});
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid body', parsed.error.flatten().fieldErrors);
+    }
+    const to = (parsed.data.to ?? req.user!.email).trim().toLowerCase();
+    const { sendWelcomeEmailNow } = await import('../../lib/mailer/index.js');
+    const result = await sendWelcomeEmailNow({
+      to,
+      name: req.user!.full_name,
+    });
+    res.json({ success: true, data: { to, sent: result.sent, mode: result.mode } });
+  })
+);
+
+/** POST /admin/mail/refund — send the refund-processed template (SMTP test). */
+router.post(
+  '/mail/refund',
+  asyncHandler(async (req, res) => {
+    const parsed = z
+      .object({
+        to: z.string().email().optional(),
+        orderNumber: z.string().min(1).optional(),
+        amountPaise: z.number().int().positive().optional(),
+      })
+      .strict()
+      .safeParse(req.body ?? {});
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid body', parsed.error.flatten().fieldErrors);
+    }
+    const to = (parsed.data.to ?? req.user!.email).trim().toLowerCase();
+    const { sendRefundProcessedEmailNow } = await import('../../lib/mailer/index.js');
+    const result = await sendRefundProcessedEmailNow({
+      to,
+      orderNumber: parsed.data.orderNumber,
+      amountPaise: parsed.data.amountPaise,
+    });
+    res.json({ success: true, data: { to, sent: result.sent, mode: result.mode } });
+  })
+);
+
+const mailToSchema = z
+  .object({ to: z.string().email().optional() })
+  .strict();
+
+/** POST /admin/mail/order — send the order-placed template (SMTP test). */
+router.post(
+  '/mail/order',
+  asyncHandler(async (req, res) => {
+    const parsed = mailToSchema.safeParse(req.body ?? {});
+    if (!parsed.success) throw ApiError.badRequest('Invalid body', parsed.error.flatten().fieldErrors);
+    const to = (parsed.data.to ?? req.user!.email).trim().toLowerCase();
+    const { sendOrderPlacedEmailNow } = await import('../../lib/mailer/index.js');
+    const result = await sendOrderPlacedEmailNow({ to });
+    res.json({ success: true, data: { to, sent: result.sent, mode: result.mode } });
+  })
+);
+
+/** POST /admin/mail/product-live — send the product-live template (SMTP test). */
+router.post(
+  '/mail/product-live',
+  asyncHandler(async (req, res) => {
+    const parsed = mailToSchema.safeParse(req.body ?? {});
+    if (!parsed.success) throw ApiError.badRequest('Invalid body', parsed.error.flatten().fieldErrors);
+    const to = (parsed.data.to ?? req.user!.email).trim().toLowerCase();
+    const { sendProductLiveEmailNow } = await import('../../lib/mailer/index.js');
+    const result = await sendProductLiveEmailNow({ to });
+    res.json({ success: true, data: { to, sent: result.sent, mode: result.mode } });
+  })
+);
+
+/** POST /admin/mail/cancel — send the order-cancelled template (SMTP test). */
+router.post(
+  '/mail/cancel',
+  asyncHandler(async (req, res) => {
+    const parsed = mailToSchema.safeParse(req.body ?? {});
+    if (!parsed.success) throw ApiError.badRequest('Invalid body', parsed.error.flatten().fieldErrors);
+    const to = (parsed.data.to ?? req.user!.email).trim().toLowerCase();
+    const { sendOrderCancelledEmailNow } = await import('../../lib/mailer/index.js');
+    const result = await sendOrderCancelledEmailNow({ to });
+    res.json({ success: true, data: { to, sent: result.sent, mode: result.mode } });
+  })
+);
+
 /** GET /admin/overview — KPIs, chart, catalog snapshot, recent orders */
 router.get(
   '/overview',

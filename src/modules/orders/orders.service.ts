@@ -196,6 +196,8 @@ export class OrdersService {
     user_id: string;
     order_number: string;
     status: string;
+    delhivery_waybill?: string | null;
+    shipping_address?: unknown;
   }) {
     const map: Record<string, { type: string; title: string; body: string }> = {
       processing: {
@@ -237,6 +239,13 @@ export class OrdersService {
       link: `/dashboard/orders/${order.id}`,
       metadata: { order_id: order.id, order_number: order.order_number, status: order.status },
     });
+
+    if (order.status === 'shipped' || order.status === 'delivered') {
+      const { sendOrderShippedEmailForOrder, sendOrderDeliveredEmailForOrder } =
+        await import('../../lib/mailer/index.js');
+      if (order.status === 'shipped') sendOrderShippedEmailForOrder(order);
+      if (order.status === 'delivered') sendOrderDeliveredEmailForOrder(order);
+    }
   }
 }
 
