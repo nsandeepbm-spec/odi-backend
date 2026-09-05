@@ -19,6 +19,7 @@ import adminRoutes from './modules/admin/admin.routes.js';
 import shippingRoutes from './modules/shipping/shipping.routes.js';
 import contactRoutes from './modules/inquiries/contact.routes.js';
 import careersRoutes from './modules/inquiries/careers.routes.js';
+import legalRoutes from './modules/legal/legal.routes.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
 export function createApp() {
@@ -106,6 +107,7 @@ export function createApp() {
   app.use('/shipping', shippingRoutes);
   app.use('/contact', formLimiter, contactRoutes);
   app.use('/careers', formLimiter, careersRoutes);
+  app.use('/legal', legalRoutes);
   app.use('/admin', adminRoutes);
 
   app.use(notFoundHandler);

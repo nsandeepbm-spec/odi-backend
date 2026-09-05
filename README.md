@@ -105,11 +105,13 @@ Test:
 
 ### SQL (run once in Supabase SQL Editor)
 
-Run **`sql/schema.sql`** — single source of truth for users + commerce (products, images, reviews, favorites, notify-me waitlist, notifications, support tickets, contact inquiries, career applications, addresses, cart, coupons, orders, payments, cancels, refunds).
+Run **`sql/schema.sql`** — single source of truth for users + commerce (products, images, reviews, favorites, notify-me waitlist, notifications, support tickets, contact inquiries, career applications, legal pages, addresses, cart, coupons, orders, payments, cancels, refunds).
 
 **Warning:** re-running drops and recreates commerce tables (wipes catalog/orders). Safe on empty projects only. Do not re-run on a live DB that already has data.
 
 **Existing databases:** copy **`sql/stock-functions.sql`** into the Supabase SQL Editor and Run. `CREATE OR REPLACE` is safe — it does not drop tables. Checkout uses these for atomic stock; without them the API falls back to a non-atomic update.
+
+**Legal pages (existing DBs):** copy **`sql/legal-pages.sql`** into the SQL Editor and Run. Safe to re-run. The API seeds official Terms / Privacy / Cookies copy on first `GET /legal/:slug`.
 
 After first sign-in, promote yourself:
 
@@ -190,6 +192,7 @@ Response shape: `{ success, data }` or `{ success: false, error: { message } }`.
 | GET | `/shipping/charges/:destinationPin` | none | Delhivery shipping cost (`?slug&quantity`) |
 | POST | `/contact` | none | Save contact / service inquiry (no email) |
 | POST | `/careers` | none | Save career application (no email) |
+| GET | `/legal/:slug` | none | Legal CMS page + company (`terms` \| `privacy` \| `cookies`) |
 | POST | `/admin/mail/welcome` | Admin | Send welcome email (`{ to?, sent, mode }`) |
 | POST | `/admin/mail/refund` | Admin | Send refund email (`{ to?, orderNumber?, amountPaise?, sent, mode }`) |
 | POST | `/admin/mail/order` | Admin | Send order-placed email (`{ to?, sent, mode }`) |
@@ -270,6 +273,11 @@ All product responses use the same serializer (`products.presenter.ts`).
 | PATCH | `/admin/contact-inquiries/:id` | Admin | Update inquiry status / note |
 | GET | `/admin/career-applications` | Admin | Public careers form submissions |
 | PATCH | `/admin/career-applications/:id` | Admin | Update application status / note |
+| GET | `/admin/legal` | Admin | Legal pages list + company card |
+| GET | `/admin/legal/:slug` | Admin | One legal page + company |
+| PUT | `/admin/legal/:slug` | Admin | Update legal page copy |
+| POST | `/admin/legal/:slug/restore` | Admin | Restore official seeded copy |
+| PUT | `/admin/legal/company` | Admin | Update company card on legal pages |
 
 ### Checkout session body
 
@@ -368,10 +376,12 @@ src/
 │   ├── orders/
 │   ├── payments/
 │   ├── inquiries/     POST /contact + /careers
+│   ├── legal/         GET /legal/:slug + admin CMS
 │   └── admin/
 └── utils/
 sql/
 ├── schema.sql          # full DB schema (run once in Supabase SQL Editor)
+├── legal-pages.sql     # existing DBs: legal_company + legal_pages
 └── stock-functions.sql # existing DBs: paste into SQL Editor for atomic stock RPCs
 ```
 

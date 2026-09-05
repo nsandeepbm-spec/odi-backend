@@ -29,6 +29,7 @@ src/modules/
 ├── notifications/ in-app inbox (bell + clear + history)
 ├── support/       customer support tickets
 ├── inquiries/     public contact + careers forms (admin list)
+├── legal/         public /legal/:slug + admin CMS for /terms /privacy /cookies
 ├── products/      public catalog + admin writes via /admin
 ├── reviews/       nested under /products/:slug/reviews + /reviews/:id
 ├── cart/          server-side cart
@@ -44,7 +45,7 @@ src/modules/
 
 Shared helpers: `src/lib/{pagination,money,razorpay,params,productImages,mailer}.ts`.
 
-SQL: single file `sql/schema.sql` (users + commerce; image `kind` = `card` / `gallery`).
+SQL: `sql/schema.sql` (users + commerce; image `kind` = `card` / `gallery`). Existing DBs: `sql/legal-pages.sql` for legal CMS.
 
 Products API: thin routes → Zod schemas → service → **`products.presenter.ts`** (stable DTO for admin + public).
 
@@ -98,6 +99,8 @@ Webhook:    Razorpay HMAC (raw body on /payments/webhook)
 | `support_tickets` | User support queries; status open → closed |
 | `contact_inquiries` | Public `/contact` form; status new / in_review / closed |
 | `career_applications` | Public `/careers` form; status new / in_review / closed |
+| `legal_company` | Singleton company card on legal pages; seeded on first read |
+| `legal_pages` | CMS for `/terms` `/privacy` `/cookies`; `sections` jsonb |
 | `cart_items` | unique (user_id, product_id) |
 | `coupons` | percent or fixed_paise |
 | `orders` | status machine + money + shipping jsonb + idempotency_key |

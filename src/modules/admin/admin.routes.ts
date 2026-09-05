@@ -575,4 +575,73 @@ router.patch(
   })
 );
 
+/** GET /admin/legal — list pages + company card */
+router.get(
+  '/legal',
+  asyncHandler(async (_req, res) => {
+    const { legalService } = await import('../legal/legal.service.js');
+    const result = await legalService.listAdmin();
+    res.json({ success: true, data: result });
+  })
+);
+
+/** PUT /admin/legal/company — update contact card shown on legal pages */
+router.put(
+  '/legal/company',
+  asyncHandler(async (req, res) => {
+    const { updateLegalCompanySchema } = await import('../legal/legal.schema.js');
+    const parsed = updateLegalCompanySchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid company details', parsed.error.flatten().fieldErrors);
+    }
+    const { legalService } = await import('../legal/legal.service.js');
+    const company = await legalService.updateCompany(parsed.data);
+    res.json({ success: true, data: { company } });
+  })
+);
+
+/** POST /admin/legal/:slug/restore — replace page with official seeded copy */
+router.post(
+  '/legal/:slug/restore',
+  asyncHandler(async (req, res) => {
+    const { legalSlugSchema } = await import('../legal/legal.schema.js');
+    const parsed = legalSlugSchema.safeParse(param(req.params.slug, 'slug'));
+    if (!parsed.success) throw ApiError.notFound('Legal page not found');
+    const { legalService } = await import('../legal/legal.service.js');
+    const page = await legalService.restorePage(parsed.data, req.user!.id);
+    const company = (await legalService.getAdmin(parsed.data)).company;
+    res.json({ success: true, data: { page, company } });
+  })
+);
+
+/** GET /admin/legal/:slug */
+router.get(
+  '/legal/:slug',
+  asyncHandler(async (req, res) => {
+    const { legalSlugSchema } = await import('../legal/legal.schema.js');
+    const parsed = legalSlugSchema.safeParse(param(req.params.slug, 'slug'));
+    if (!parsed.success) throw ApiError.notFound('Legal page not found');
+    const { legalService } = await import('../legal/legal.service.js');
+    const result = await legalService.getAdmin(parsed.data);
+    res.json({ success: true, data: result });
+  })
+);
+
+/** PUT /admin/legal/:slug */
+router.put(
+  '/legal/:slug',
+  asyncHandler(async (req, res) => {
+    const { legalSlugSchema, updateLegalPageSchema } = await import('../legal/legal.schema.js');
+    const slugParsed = legalSlugSchema.safeParse(param(req.params.slug, 'slug'));
+    if (!slugParsed.success) throw ApiError.notFound('Legal page not found');
+    const parsed = updateLegalPageSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid legal page', parsed.error.flatten().fieldErrors);
+    }
+    const { legalService } = await import('../legal/legal.service.js');
+    const page = await legalService.updatePage(slugParsed.data, parsed.data, req.user!.id);
+    res.json({ success: true, data: { page } });
+  })
+);
+
 export default router;
