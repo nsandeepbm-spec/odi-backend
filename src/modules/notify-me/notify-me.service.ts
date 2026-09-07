@@ -208,6 +208,9 @@ export class NotifyMeService {
       },
     });
 
+    const imageByProduct = await this.cardImagesByProduct([product.id]);
+    const imageUrl = imageByProduct.get(product.id) ?? null;
+
     const { sendProductLiveEmail } = await import('../../lib/mailer/index.js');
     for (const p of pending) {
       if (!p.email) continue;
@@ -216,6 +219,7 @@ export class NotifyMeService {
         name: p.fullName,
         productName: product.name,
         productSlug: product.slug,
+        imageUrl,
       });
     }
 

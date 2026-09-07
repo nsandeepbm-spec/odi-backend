@@ -22,30 +22,34 @@ Express 5 + TypeScript + Firebase Admin (token verify) + Supabase (Postgres, ser
 src/modules/
 ├── auth/          POST /auth/sync
 ├── user/          GET/PATCH /user/me + /user/addresses/* + /user/favorites/* + /user/reviews
-├── users/         GET /users (admin) + shared users.service
+├── users/         GET/PATCH/DELETE /users (admin) + shared users.service
 ├── addresses/     address CRUD service
 ├── favorites/     wishlist CRUD service
 ├── notify-me/     product launch waitlist (“Notify Me”)
 ├── notifications/ in-app inbox (bell + clear + history)
 ├── support/       customer support tickets
+├── inquiries/     public contact + careers forms (admin list)
+├── legal/         public /legal/:slug + admin CMS for /terms /privacy /cookies
 ├── products/      public catalog + admin writes via /admin
 ├── reviews/       nested under /products/:slug/reviews + /reviews/:id
 ├── cart/          server-side cart
 ├── coupons/       POST /coupons/validate
 ├── checkout/      POST /checkout/sessions
-├── orders/        GET /orders, /orders/:id
+├── orders/        GET /orders, /orders/:id, /orders/:id/cancel, /orders/:id/refund
 ├── payments/      webhook + verify + mark-paid
-├── shipping/      Delhivery pincode serviceability (step 1 of fulfillment)
-└── admin/         /admin/products, /admin/orders
+├── shipping/      Delhivery pincode, TAT, and shipping charges
+├── fulfillment/   Delhivery waybill + shipment creation (auto after pay)
+├── cancels/       cancel + refund services (mounted on /orders and /admin)
+└── admin/         /admin/products, /admin/orders, /admin/cancels, /admin/refunds
 ```
 
 Shared helpers: `src/lib/{pagination,money,razorpay,params,productImages,mailer}.ts`.
 
-SQL: single file `sql/schema.sql` (users + commerce; image `kind` = `card` / `gallery`).
+SQL: `sql/schema.sql` (users + commerce; image `kind` = `card` / `gallery`). Existing DBs: `sql/legal-pages.sql` for legal CMS.
 
 Products API: thin routes → Zod schemas → service → **`products.presenter.ts`** (stable DTO for admin + public).
 
-Transactional email (Gmail SMTP): welcome on first `/auth/sync`, order placed on new checkout session, product-live from waitlist. Templates live under `src/lib/mailer/`. Without `SMTP_PASS`, sends are logged to console.
+Transactional email (Gmail SMTP): welcome on first `/auth/sync`, order placed after payment/COD, shipped, delivered, cancelled, product-live from waitlist, refund processed, support reply. Templates live under `src/lib/mailer/`. They share the black navbar/footer shell. Without `SMTP_PASS`, sends are logged to console.
 
 ---
 
@@ -93,11 +97,17 @@ Webhook:    Razorpay HMAC (raw body on /payments/webhook)
 | `product_notify_requests` | “Notify Me” waitlist; `notified_at` set after in-app launch notify; join `products.status` |
 | `notifications` | In-app bell + history; `cleared_at` hides from bell only; launch/order emails via `lib/mailer` |
 | `support_tickets` | User support queries; status open → closed |
+| `contact_inquiries` | Public `/contact` form; status new / in_review / closed |
+| `career_applications` | Public `/careers` form; status new / in_review / closed |
+| `legal_company` | Singleton company card on legal pages; seeded on first read |
+| `legal_pages` | CMS for `/terms` `/privacy` `/cookies`; `sections` jsonb |
 | `cart_items` | unique (user_id, product_id) |
 | `coupons` | percent or fixed_paise |
 | `orders` | status machine + money + shipping jsonb + idempotency_key |
 | `order_items` | price/name/slug/image snapshots |
 | `payments` | razorpay ids + status |
+| `cancels` | user cancel requests; approve → Delhivery cancel + queue refund |
+| `refunds` | queued after approved cancel; admin approve → Razorpay `POST /v1/payments/:id/refund` (`amount` in paise) |
 
 Order status: `pending → paid → processing → shipped → delivered` (also `cancelled` / `refunded`).
 
@@ -107,7 +117,7 @@ Order status: `pending → paid → processing → shipped → delivered` (also 
 
 Required: `FIREBASE_PROJECT_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
-Payments: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`.
+Payments: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_URL` (`https://odi.studio/payments/webhook`), `RAZORPAY_WEBHOOK_SECRET` (paste from Razorpay Dashboard — do not invent).
 
 Optional: `SUPABASE_STORAGE_BUCKET=product-images`, `TRUST_PROXY`, `CORS_ORIGIN`, `FRONTEND_URL`, `MAIL_FROM`, `SMTP_*` (Gmail App Password for `odistudio24@gmail.com`).
 

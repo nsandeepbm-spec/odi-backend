@@ -13,7 +13,9 @@ export type NotificationType =
   | 'product_live'
   | 'admin_product_live'
   | 'admin_order_created'
-  | 'admin_order_paid';
+  | 'admin_order_paid'
+  | 'admin_support_ticket'
+  | 'support_replied';
 
 export type CreateNotificationInput = {
   userId: string;
