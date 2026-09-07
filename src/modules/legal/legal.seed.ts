@@ -316,32 +316,13 @@ const TERMS_SECTIONS: LegalSection[] = [
       'Nothing in these Terms limits or excludes liability to the extent such limitation or exclusion is prohibited by law, including liability that cannot legally be excluded. For paid creative services, any agreed limitation of liability should be interpreted together with the applicable project agreement.'
     ),
   ]),
-  sec('force-majeure', 'Force majeure', [
-    p(
-      'ODI Studio will not be responsible for delay or failure caused by circumstances beyond its reasonable control, including natural disasters, fire, flood, epidemic, war, civil disturbance, government restrictions, strikes, infrastructure failures, internet or telecommunications failures, courier disruptions or other force majeure events. We will take reasonable steps to minimise the impact of such events.'
-    ),
-  ]),
   sec('complaints', 'Complaints and customer support', [
     p(
-      'Customers are encouraged to contact ODI Studio first so that we can investigate and resolve concerns efficiently.'
+      'Customers are encouraged to contact ODI Studio first so that we can investigate and resolve concerns efficiently. When contacting us, please provide your name, order/invoice number, contact details and a clear description of the issue.'
     ),
     contact,
     p(
-      'When contacting us, please provide your name, order/invoice number, contact details and a clear description of the issue. We will make reasonable efforts to acknowledge and address complaints within a reasonable time. Nothing in this process prevents a consumer from exercising any statutory right to approach a competent authority or forum.'
-    ),
-  ]),
-  sec('changes', 'Changes to products and terms', [
-    p('We may update these Terms from time to time to reflect changes in:'),
-    ul([
-      'products or services;',
-      'technology;',
-      'business practices;',
-      'applicable law;',
-      'regulatory requirements;',
-      'security or privacy practices.',
-    ]),
-    p(
-      'The updated version will be published on the website with an updated “Last Updated” date. Changes will not retrospectively remove rights that have already accrued under applicable law or an existing agreement.'
+      'Nothing in this process prevents a consumer from exercising any statutory right to approach a competent authority or forum.'
     ),
   ]),
   sec('governing-law', 'Governing law and jurisdiction', [
@@ -353,295 +334,94 @@ const TERMS_SECTIONS: LegalSection[] = [
       'Nothing in this clause prevents a consumer from exercising a mandatory statutory right to approach a competent consumer authority or forum.'
     ),
   ]),
-  sec('severability', 'Severability', [
-    p(
-      'If any provision of these Terms is found to be unlawful, invalid or unenforceable, that provision shall be modified or severed only to the extent necessary, and the remaining provisions shall continue to operate to the extent permitted by law.'
-    ),
-  ]),
-  sec('entire-agreement', 'Entire agreement', [
-    p(
-      'These Terms, together with the applicable product description, quotation, invoice, order confirmation, purchase order, service agreement and other written terms expressly incorporated into an order, constitute the agreement applicable to the relevant transaction.'
-    ),
-    p(
-      'If there is a conflict between these Terms and a specific written project agreement, the specific agreement will prevail to the extent of the conflict.'
-    ),
-  ]),
-  sec('contact', 'Contact', [
-    p('Questions about these Terms can be sent via the Contact page on this website, or using the details below.'),
-    contact,
-  ]),
 ];
 
 const PRIVACY_SECTIONS: LegalSection[] = [
-  sec('introduction', 'Introduction', [
-    p('This Policy applies to information collected through:'),
-    ul([
-      'www.odi.studio;',
-      'ODI Studio product purchases;',
-      '3D Adventure Kit orders;',
-      'offline orders;',
-      'customer enquiries;',
-      'stereo conversion and creative service engagements;',
-      'email, telephone and other customer communications;',
-      'forms and other interactions with ODI Studio.',
-    ]),
-  ]),
-  sec('controller', 'Data controller / organisation', [
+  sec('information-we-collect', 'Information we collect', [
     p(
-      'For the purposes of applicable data-protection law, the relevant organisation responsible for personal data processed by ODI Studio is:'
+      'When you use www.odi.studio, place an order, enquire, or work with us on a project, we may collect:'
     ),
-    contact,
-  ]),
-  sec('information-we-collect', 'Information we may collect', [
-    p('Depending on how you interact with us, we may collect:'),
-    h3('Identity information'),
+    h3('Identity and contact'),
     ul([
-      'name;',
-      'organisation/company name;',
-      'billing information;',
-      'GSTIN where supplied;',
-      'information necessary for invoices and business records.',
+      'name and organisation name;',
+      'email address and phone number;',
+      'delivery and billing address;',
+      'GSTIN where you supply it for an invoice.',
     ]),
-    h3('Contact information'),
-    ul(['email address;', 'telephone/mobile number;', 'postal or delivery address.']),
-    h3('Transaction information'),
+    h3('Orders and payments'),
     ul([
-      'products or services purchased;',
-      'order information;',
-      'invoice information;',
-      'payment status;',
-      'transaction/reference information.',
+      'products purchased, quantities and order details;',
+      'invoice and payment status;',
+      'transaction references from the payment provider.',
     ]),
     p(
-      'We generally do not need to store complete payment-card information where payment processing is handled by a third-party payment provider.'
+      'Card numbers and CVVs are handled by the payment provider. Do not send card PINs, CVVs or passwords to ODI Studio by email or phone.'
     ),
-    h3('Service / project information'),
-    p('For stereo conversion or other services, we may process:'),
+    h3('Website'),
     ul([
-      'project requirements;',
-      'communication records;',
-      'source files;',
-      'output files;',
-      'technical specifications;',
-      'project-related information supplied by the customer.',
+      'pages viewed and how you reach the site;',
+      'device and browser information;',
+      'cookies as described in our Cookies Policy.',
     ]),
-    h3('Website and technical information'),
-    p('Depending on our technology configuration, we may collect:'),
+    h3('Project files (stereo / creative work)'),
+    p(
+      'If you send video, images or other files for conversion, we store them only to complete the agreed work. Do not include extra personal data in those files unless it is needed for the job.'
+    ),
+  ]),
+  sec('how-we-use', 'How we use it', [
+    p('We use this information to:'),
     ul([
-      'IP address;',
-      'browser type;',
-      'device information;',
-      'operating system;',
-      'approximate location derived from technical information;',
-      'pages viewed;',
-      'referral information;',
-      'website interaction data;',
-      'cookies and similar technologies.',
+      'take and fulfil orders, including shipping;',
+      'issue invoices and process payments;',
+      'answer enquiries and provide support;',
+      'run stereo conversion or other booked services;',
+      'keep accounts, prevent fraud, and meet tax and legal duties;',
+      'send order updates (and, where allowed, offers you can opt out of).',
     ]),
   ]),
-  sec('how-we-use', 'How we use personal information', [
-    p('We may process personal information to:'),
+  sec('marketing', 'Offers and messages', [
+    p(
+      'We send messages needed for your order. We may also send product news or offers where permitted. You can opt out of marketing by using unsubscribe in the email or writing to hello@odi.studio. Order and delivery messages will still be sent.'
+    ),
+  ]),
+  sec('sharing', 'Who we share it with', [
+    p('We share information only where needed to run the shop, for example:'),
     ul([
-      'provide products and services;',
-      'process and fulfil orders;',
-      'arrange delivery;',
-      'issue invoices;',
-      'process payments;',
-      'provide customer support;',
-      'respond to enquiries;',
-      'manage stereo conversion projects;',
-      'communicate about orders and services;',
-      'maintain business and accounting records;',
-      'prevent fraud and abuse;',
-      'maintain website and information-security systems;',
-      'improve products and services;',
-      'comply with applicable legal, tax and regulatory obligations;',
-      'enforce our agreements;',
-      'resolve disputes;',
-      'send promotional communications where permitted and, where required, with appropriate consent.',
+      'payment providers;',
+      'courier and logistics partners;',
+      'hosting, email and IT providers;',
+      'accountants or lawyers;',
+      'government or tax authorities when the law requires it.',
     ]),
+    p('We do not sell your personal information.'),
   ]),
-  sec('legal-basis', 'Legal basis / permitted processing', [
+  sec('security-retention', 'Security and how long we keep it', [
     p(
-      'We process personal information only for lawful purposes and in accordance with applicable data-protection requirements. Depending on the circumstances, processing may be based on:'
-    ),
-    ul([
-      'your consent;',
-      'steps necessary to provide a product or service requested by you;',
-      'compliance with a legal obligation;',
-      'legitimate and lawful business purposes where permitted;',
-      'protection against fraud, misuse or security threats;',
-      'establishment, exercise or defence of legal claims;',
-      'other lawful grounds recognised under applicable law.',
-    ]),
-    p('Where consent is required, we will seek it in an appropriate manner.'),
-  ]),
-  sec('consent', 'Consent and withdrawal', [
-    p(
-      'Where processing is based on consent, you may withdraw consent subject to applicable law. Withdrawal of consent does not invalidate processing that occurred lawfully before withdrawal.'
+      'We use access controls, secure connections and limited staff access to protect information. No website can be guaranteed fully secure, but we take reasonable care.'
     ),
     p(
-      'Some information may need to continue to be retained where required for legal, tax, accounting, fraud-prevention, dispute-resolution or other lawful purposes.'
-    ),
-  ]),
-  sec('marketing', 'Marketing communications', [
-    p(
-      'We may send service-related communications necessary to fulfil an order or provide a service. Where permitted, we may also send marketing communications about ODI Studio products, services, offers or announcements.'
-    ),
-    p(
-      'You may opt out of promotional communications by using the unsubscribe mechanism where provided or by contacting us at hello@odi.studio. Opting out of marketing communications will not necessarily stop essential transactional or service communications.'
-    ),
-  ]),
-  sec('cookies', 'Cookies and similar technologies', [
-    p(
-      'ODI Studio may use cookies, pixels, local storage and similar technologies to operate and improve the website. These technologies may be used for:'
-    ),
-    ul([
-      'essential website functionality;',
-      'security;',
-      'remembering preferences;',
-      'analytics;',
-      'performance measurement;',
-      'marketing, where applicable and permitted.',
-    ]),
-    p(
-      'Where legally required, we will provide appropriate choices regarding non-essential cookies. You may also manage cookies through your browser settings, although disabling certain cookies may affect website functionality. See the Cookies Policy on this website for more detail.'
-    ),
-  ]),
-  sec('payments', 'Payment information', [
-    p(
-      'Payments may be processed by third-party payment providers. Where a payment provider processes payment information, the provider may independently process certain information under its own privacy policy and terms.'
-    ),
-    p(
-      'ODI Studio does not generally require customers to provide full card credentials directly to ODI Studio. Customers should never send passwords, card PINs, CVVs or similar sensitive authentication information to ODI Studio by email or telephone.'
-    ),
-  ]),
-  sec('sharing', 'Sharing personal information', [
-    p(
-      'We may share information with service providers where reasonably necessary to operate our business, including:'
-    ),
-    ul([
-      'payment processors;',
-      'courier and logistics providers;',
-      'website and hosting providers;',
-      'cloud-storage providers;',
-      'IT and cybersecurity providers;',
-      'communication providers;',
-      'accounting and professional advisers;',
-      'analytics providers;',
-      'legal advisers;',
-      'government, tax, law-enforcement or regulatory authorities where legally required.',
-    ]),
-    p(
-      'We do not sell personal information to third parties as a business practice. Service providers receiving personal information are expected to handle it appropriately and only for authorised purposes.'
-    ),
-  ]),
-  sec('international', 'International data transfers', [
-    p(
-      'Some service providers may process information outside India. Where personal data is transferred or processed outside India, ODI Studio will take steps required by applicable law, including applicable restrictions, contractual safeguards or other lawful mechanisms.'
-    ),
-  ]),
-  sec('security', 'Data security', [
-    p(
-      'We use reasonable technical and organisational measures designed to protect personal information against unauthorised access, misuse, loss, alteration or disclosure. Security measures may include:'
-    ),
-    ul([
-      'access controls;',
-      'authentication;',
-      'secure communications;',
-      'restricted employee access;',
-      'service-provider controls;',
-      'backups;',
-      'monitoring and security procedures.',
-    ]),
-    p(
-      'No internet transmission or electronic storage system can be guaranteed to be completely secure. Accordingly, while we take reasonable precautions, we cannot guarantee absolute security.'
-    ),
-  ]),
-  sec('retention', 'Data retention', [
-    p(
-      'We retain personal information only for as long as reasonably necessary for the purposes for which it was collected, or for longer where required or permitted by law. Retention periods may depend on:'
-    ),
-    ul([
-      'the nature of the information;',
-      'the purpose of processing;',
-      'legal and tax requirements;',
-      'accounting requirements;',
-      'contractual obligations;',
-      'dispute-resolution needs;',
-      'fraud-prevention and security requirements.',
-    ]),
-    p(
-      'When information is no longer required, we may securely delete, anonymise or otherwise dispose of it as appropriate.'
-    ),
-  ]),
-  sec('project-files', 'Customer project files', [
-    p(
-      'Where customers provide video, image, audio or other files for stereo conversion or creative services, ODI Studio may store and process those files for the purpose of performing the agreed services. Customers should not provide unnecessary personal information within project files.'
-    ),
-    p(
-      'The customer is responsible for ensuring that they have the necessary rights and permissions to provide any third-party personal data or copyrighted material contained in project files. Where a project agreement specifies a particular file-retention or deletion period, that agreement will apply.'
+      'We keep information only as long as needed for the order, accounts, tax, support or the law, then delete or anonymise it.'
     ),
   ]),
   sec('children', "Children's privacy", [
     p(
-      'Our website and commercial services are not intended to knowingly collect unnecessary personal information directly from children. Where products are intended for children or educational use, purchases and interactions should be handled by a parent, guardian, teacher, institution or other responsible adult where appropriate.'
-    ),
-    p(
-      'If you believe a child has provided personal information to us in circumstances where it should not have been collected, please contact us.'
+      'We do not try to collect extra personal information directly from children. ODI Kids products should be ordered by a parent, guardian, teacher or other responsible adult. If a child has sent us information in error, contact us and we will delete it where we can.'
     ),
   ]),
-  sec('rights', 'Your data protection rights', [
-    p(
-      'Subject to applicable law, individuals may have rights relating to their personal information, which may include rights to:'
-    ),
+  sec('rights', 'Your choices', [
+    p('You may ask us to:'),
     ul([
-      'obtain information about processing;',
-      'access personal information;',
-      'request correction of inaccurate information;',
-      'request deletion where legally available;',
-      'withdraw consent where processing is based on consent;',
-      'exercise applicable grievance or complaint rights;',
-      'exercise other rights provided under applicable data-protection law.',
+      'tell you what information we hold;',
+      'correct it if it is wrong;',
+      'delete it where the law allows;',
+      'stop marketing messages.',
     ]),
     p(
-      'Certain rights may be subject to legal exceptions, verification requirements or other limitations. To exercise a right, contact hello@odi.studio or +91 9876907266. We may request reasonable information to verify your identity before acting on a request.'
+      'Email hello@odi.studio or call +91 9876907266. We may need to confirm it is you before we act.'
     ),
-  ]),
-  sec('complaints', 'Data protection complaints', [
-    p(
-      'If you believe that your personal information has been handled improperly, please contact us first so that we can investigate and attempt to resolve the matter.'
-    ),
-    contact,
-    p(
-      'We will handle privacy complaints in accordance with applicable law and our internal procedures. Nothing in this Policy prevents you from exercising rights available under applicable law.'
-    ),
-  ]),
-  sec('third-party-sites', 'Third-party websites', [
-    p(
-      'Our website may contain links to third-party websites, social-media platforms, payment providers or other external services. We are not responsible for the privacy practices of those third parties. You should review their respective privacy policies before providing information to them.'
-    ),
-  ]),
-  sec('business-transfers', 'Business transfers', [
-    p(
-      'If Oceaniek Technologies India undergoes a merger, restructuring, sale of assets, acquisition or similar business transaction, personal information may be transferred as part of that transaction, subject to applicable law and appropriate safeguards.'
-    ),
-  ]),
-  sec('changes', 'Changes to this Privacy Policy', [
-    p('We may update this Privacy Policy from time to time to reflect:'),
-    ul([
-      'changes in our services;',
-      'changes in technology;',
-      'changes in privacy practices;',
-      'changes in applicable laws or regulations;',
-      'regulatory guidance.',
-    ]),
-    p('The latest version will be published on the website with its updated effective date.'),
   ]),
   sec('contact', 'Contact us', [
-    p(
-      'For questions, requests or complaints regarding this Privacy Policy, use the Contact page on this website or the details below.'
-    ),
+    p('Questions about privacy can be sent via the Contact page, or using the details below.'),
     contact,
   ]),
 ];
@@ -674,11 +454,6 @@ const COOKIES_SECTIONS: LegalSection[] = [
       'For how we process personal information collected through these technologies, see the Privacy Policy on this website.'
     ),
   ]),
-  sec('updates', 'Updates', [
-    p(
-      'We may update this Cookies Policy when our technology, privacy practices or legal requirements change. Check the effective and last-updated dates on this page for the current version.'
-    ),
-  ]),
   sec('contact', 'Contact', [
     p('Questions about cookies or this policy can be sent to hello@odi.studio.'),
     contact,
@@ -702,7 +477,7 @@ export const SEED_PAGES: Omit<LegalPage, 'updatedAt'>[] = [
     title: 'Privacy',
     titleAccent: 'Policy',
     intro:
-      'ODI Studio, a brand of Oceaniek Technologies India, respects your privacy and is committed to handling personal information responsibly. This Privacy Policy explains what information we may collect, why we collect it, how we use it, how we protect it, when we may share it, and the choices and rights available to individuals under applicable law.',
+      'This page explains what information ODI Studio collects when you shop, enquire, or use our website, how we use it, and how you can reach us.',
     ...DATES,
     sections: PRIVACY_SECTIONS,
   },
