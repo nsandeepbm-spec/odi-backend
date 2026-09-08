@@ -1,6 +1,7 @@
 /** Professional ODI email shell — clean header, Afacad Flux, social footer. */
 
 import { env } from '../../config/env.js';
+import { BRAND_LOGO_URL, BRAND_SOCIAL } from './brand.js';
 
 const C = {
   pageBg: '#F0F2F5',
@@ -15,25 +16,6 @@ const C = {
 } as const;
 
 const FONT = "'Afacad Flux', Arial, Helvetica, sans-serif";
-
-const SOCIAL = {
-  instagram: env.mail.instagramUrl || 'https://www.instagram.com/odi3dstudio/',
-  facebook:
-    env.mail.facebookUrl ||
-    'https://www.facebook.com/people/Oceaniek-Dimension-Industries/61589448369192/',
-  linkedin: env.mail.linkedinUrl || 'https://www.linkedin.com/company/odistudioglobal',
-  youtube: env.mail.youtubeUrl || 'https://www.youtube.com/@ODI.STUDIO',
-  icons: {
-    instagram:
-      'https://joiezvghtlyeyhuyvnwl.supabase.co/storage/v1/object/public/product-images/brand/email-instagram.png',
-    facebook:
-      'https://joiezvghtlyeyhuyvnwl.supabase.co/storage/v1/object/public/product-images/brand/email-facebook.png',
-    linkedin:
-      'https://joiezvghtlyeyhuyvnwl.supabase.co/storage/v1/object/public/product-images/brand/email-linkedin.png',
-    youtube:
-      'https://joiezvghtlyeyhuyvnwl.supabase.co/storage/v1/object/public/product-images/brand/email-youtube.png',
-  },
-} as const;
 
 export function absoluteUrl(path: string): string {
   const base = env.frontendUrl;
@@ -57,8 +39,219 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function escapeAttr(value: string): string {
+export function escapeAttr(value: string): string {
   return escapeHtml(value).replace(/'/g, '&#39;');
+}
+
+export function formatEmailDate(iso?: string | null): string {
+  const d = iso ? new Date(iso) : new Date();
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+/** Shared chrome for branded mail: black logo bar, gold rule, side borders, black social footer. */
+export const BRAND_EMAIL = {
+  white: '#FFFFFF',
+  black: '#000000',
+  ink: '#111111',
+  body: '#555555',
+  rule: '#C4A47A',
+  button: '#2563EB',
+  muted: '#A3A3A3',
+} as const;
+
+export const BRAND_EMAIL_FONT = 'Arial, Helvetica, sans-serif';
+
+export function renderBrandCta(href: string, label: string): string {
+  const C = BRAND_EMAIL;
+  const FONT = BRAND_EMAIL_FONT;
+  return `<table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td bgcolor="${C.button}" style="background:${C.button};">
+                    <a href="${escapeAttr(href)}"
+                       style="display:inline-block;padding:14px 28px;font-family:${FONT};font-size:15px;font-weight:700;color:${C.white};text-decoration:none;">
+                      ${escapeHtml(label)}
+                    </a>
+                  </td>
+                </tr>
+              </table>`;
+}
+
+export const BRAND_EMAIL_UI = {
+  orange: '#E85D04',
+  blueBar: '#2563EB',
+  line: '#E5E5E5',
+  support: 'odistudio24@gmail.com',
+} as const;
+
+export function formatOrderNumber(orderNumber: string): string {
+  const n = orderNumber.trim();
+  return n.startsWith('#') ? n : `#${n}`;
+}
+
+export function renderSectionHead(label: string): string {
+  const FONT = BRAND_EMAIL_FONT;
+  const { orange, blueBar, line } = BRAND_EMAIL_UI;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:36px 0 8px;">
+                <tr>
+                  <td style="white-space:nowrap;padding:0 12px 0 0;font-family:${FONT};font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:${orange};">
+                    ${escapeHtml(label)}
+                  </td>
+                  <td style="width:100%;">
+                    <div style="height:1px;line-height:1px;font-size:0;background:${line};">&nbsp;</div>
+                  </td>
+                </tr>
+              </table>
+              <div style="height:3px;line-height:3px;font-size:0;background:${blueBar};margin:0 0 16px;">&nbsp;</div>`;
+}
+
+export function renderTwoCol(
+  left: { label: string; title: string; sub?: string },
+  right: { label: string; title: string; sub?: string }
+): string {
+  const C = BRAND_EMAIL;
+  const FONT = BRAND_EMAIL_FONT;
+  const orange = BRAND_EMAIL_UI.orange;
+  const cell = (col: { label: string; title: string; sub?: string }) => `
+                    <p style="margin:0 0 8px;font-family:${FONT};font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${orange};">
+                      ${escapeHtml(col.label)}
+                    </p>
+                    ${
+                      col.title
+                        ? `<p style="margin:0;font-family:${FONT};font-size:15px;font-weight:700;line-height:1.45;color:${C.ink};">${escapeHtml(col.title)}</p>`
+                        : ''
+                    }
+                    ${
+                      col.sub
+                        ? `<p style="margin:${col.title ? '6px' : '0'} 0 0;font-family:${FONT};font-size:13px;line-height:1.55;color:${C.body};">${col.sub}</p>`
+                        : ''
+                    }`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td width="50%" valign="top" style="padding:0 16px 0 0;">${cell(left)}
+                  </td>
+                  <td width="50%" valign="top" style="padding:0 0 0 8px;">${cell(right)}
+                  </td>
+                </tr>
+              </table>`;
+}
+
+export function renderBrandCtaOutline(href: string, label: string): string {
+  const FONT = BRAND_EMAIL_FONT;
+  const rule = BRAND_EMAIL.rule;
+  return `<table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="border:1px solid ${rule};">
+                    <a href="${escapeAttr(href)}"
+                       style="display:inline-block;padding:13px 26px;font-family:${FONT};font-size:15px;font-weight:700;color:${rule};text-decoration:none;">
+                      ${escapeHtml(label)}
+                    </a>
+                  </td>
+                </tr>
+              </table>`;
+}
+
+export function formatAddressHtml(addr: {
+  first_name?: string | null;
+  last_name?: string | null;
+  street?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+} | null | undefined): string {
+  if (!addr) return escapeHtml('—');
+  const name = `${addr.first_name ?? ''} ${addr.last_name ?? ''}`.trim();
+  const cityLine = [addr.city, addr.state, addr.postal_code].filter(Boolean).join(', ');
+  return [name, addr.street, cityLine]
+    .filter(Boolean)
+    .map((line) => escapeHtml(line as string))
+    .join('<br />');
+}
+
+export function renderBrandEmailShell(opts: {
+  title: string;
+  preheader: string;
+  bodyHtml: string;
+}): string {
+  const C = BRAND_EMAIL;
+  const FONT = BRAND_EMAIL_FONT;
+  const home = absoluteUrl('/');
+  const year = new Date().getFullYear();
+  const logoUrl = BRAND_LOGO_URL;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(opts.title)}</title>
+</head>
+<body style="margin:0;padding:0;background:${C.white};font-family:${FONT};-webkit-font-smoothing:antialiased;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;font-size:1px;line-height:1px;">
+    ${escapeHtml(opts.preheader)}
+  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.white};">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;">
+
+          <tr>
+            <td bgcolor="${C.black}" align="left" style="background:${C.black};padding:22px 28px;">
+              <a href="${escapeAttr(home)}" style="text-decoration:none;display:inline-block;">
+                <img src="${escapeAttr(logoUrl)}" alt="ODI" width="96" height="40"
+                     style="display:block;border:0;outline:none;height:auto;max-width:96px;" />
+              </a>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="left" style="padding:0;background:${C.white};">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                     style="border-left:1px solid ${C.black};border-right:1px solid ${C.black};">
+                <tr>
+                  <td align="left" style="padding:40px 28px 64px;background:${C.white};">
+                    <div style="height:1px;line-height:1px;font-size:0;background:${C.rule};margin:0 0 36px;">&nbsp;</div>
+                    ${opts.bodyHtml}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td bgcolor="${C.black}" align="center" style="background:${C.black};padding:28px 28px 32px;">
+              ${renderSocialIconsHtml()}
+              <p style="margin:18px 0 0;font-family:${FONT};font-size:12px;line-height:1.5;color:${C.muted};">
+                © ${year} ODI Studio
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export function renderSocialIconsHtml(): string {
+  const cells = BRAND_SOCIAL.map(
+    (s) => `
+                  <td style="padding:0 7px;">
+                    <a href="${escapeAttr(s.href)}" style="text-decoration:none;" target="_blank">
+                      <img src="${escapeAttr(s.icon)}" width="26" height="26" alt="${escapeHtml(s.label)}" style="display:block;border:0;" />
+                    </a>
+                  </td>`
+  ).join('');
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 16px;">
+                <tr>${cells}
+                </tr>
+              </table>`;
 }
 
 export function renderEmailLayout(opts: {
@@ -73,7 +266,7 @@ export function renderEmailLayout(opts: {
   summaryRows?: Array<{ label: string; valueHtml: string }>;
 }): string {
   const year = new Date().getFullYear();
-  const logoUrl = env.mail.logoUrl;
+  const logoUrl = BRAND_LOGO_URL;
   const home = absoluteUrl('/');
   const products = absoluteUrl('/products');
   const support = 'odistudio24@gmail.com';
@@ -196,30 +389,7 @@ export function renderEmailLayout(opts: {
                 <a href="${escapeAttr(absoluteUrl('/about'))}" style="color:#E2E8F0;text-decoration:none;margin:0 8px;">About</a>
               </p>
 
-              <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 16px;">
-                <tr>
-                  <td style="padding:0 7px;">
-                    <a href="${escapeAttr(SOCIAL.instagram)}" style="text-decoration:none;" target="_blank">
-                      <img src="${SOCIAL.icons.instagram}" width="26" height="26" alt="Instagram" style="display:block;border:0;" />
-                    </a>
-                  </td>
-                  <td style="padding:0 7px;">
-                    <a href="${escapeAttr(SOCIAL.facebook)}" style="text-decoration:none;" target="_blank">
-                      <img src="${SOCIAL.icons.facebook}" width="26" height="26" alt="Facebook" style="display:block;border:0;" />
-                    </a>
-                  </td>
-                  <td style="padding:0 7px;">
-                    <a href="${escapeAttr(SOCIAL.linkedin)}" style="text-decoration:none;" target="_blank">
-                      <img src="${SOCIAL.icons.linkedin}" width="26" height="26" alt="LinkedIn" style="display:block;border:0;" />
-                    </a>
-                  </td>
-                  <td style="padding:0 7px;">
-                    <a href="${escapeAttr(SOCIAL.youtube)}" style="text-decoration:none;" target="_blank">
-                      <img src="${SOCIAL.icons.youtube}" width="26" height="26" alt="YouTube" style="display:block;border:0;" />
-                    </a>
-                  </td>
-                </tr>
-              </table>
+              ${renderSocialIconsHtml()}
 
               <p style="margin:0 0 8px;font-family:${FONT};font-size:11px;color:#94A3B8;">
                 © ${year} ODI Studio. All rights reserved.

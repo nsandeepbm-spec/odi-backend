@@ -31,7 +31,27 @@ export class SupportService {
       .single();
 
     if (error) throw error;
-    return serialize(data as Record<string, unknown>);
+
+    const ticket = serialize(data as Record<string, unknown>);
+    const { data: customer } = await supabase
+      .from('users')
+      .select('email, full_name')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const { notificationsService } = await import('../notifications/notifications.service.js');
+    await notificationsService.notifyAdmins(
+      {
+        type: 'admin_support_ticket',
+        title: 'New support ticket',
+        body: `${customer?.email ?? 'Customer'}: ${ticket.subject}`,
+        link: '/dashboard/admin/inbox',
+        metadata: { ticket_id: ticket.id, user_id: userId },
+      },
+      { excludeUserId: userId }
+    );
+
+    return ticket;
   }
 
   async listForUser(userId: string, page = 1, perPage = 20) {
@@ -98,7 +118,7 @@ export class SupportService {
   ) {
     const { data: existing, error: findErr } = await supabase
       .from('support_tickets')
-      .select('id')
+      .select('id, user_id, subject, message, status, admin_note')
       .eq('id', id)
       .maybeSingle();
 
@@ -113,7 +133,44 @@ export class SupportService {
       .single();
 
     if (error) throw error;
-    return serialize(data as Record<string, unknown>);
+
+    const ticket = serialize(data as Record<string, unknown>);
+    const note = (ticket.admin_note ?? '').trim();
+    const prevNote = ((existing.admin_note as string | null) ?? '').trim();
+    const noteChanged = note.length > 0 && note !== prevNote;
+    const statusChanged = ticket.status !== existing.status;
+
+    if (noteChanged || statusChanged) {
+      const { notificationsService } = await import('../notifications/notifications.service.js');
+      await notificationsService.safeCreate({
+        userId: ticket.user_id,
+        type: 'support_replied',
+        title: noteChanged ? 'Support replied on your ticket' : 'Support ticket updated',
+        body: noteChanged ? note.slice(0, 180) : `Status is now ${ticket.status.replace(/_/g, ' ')}.`,
+        link: '/dashboard/inbox',
+        metadata: { ticket_id: ticket.id, status: ticket.status },
+      });
+    }
+
+    if (noteChanged) {
+      const { data: customer } = await supabase
+        .from('users')
+        .select('email')
+        .eq('id', ticket.user_id)
+        .maybeSingle();
+      const to = typeof customer?.email === 'string' ? customer.email : null;
+      if (to) {
+        const { sendSupportReplyEmail } = await import('../../lib/mailer/index.js');
+        sendSupportReplyEmail({
+          to,
+          subject: ticket.subject,
+          reply: note,
+          status: ticket.status,
+        });
+      }
+    }
+
+    return ticket;
   }
 }
 

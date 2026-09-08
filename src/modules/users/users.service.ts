@@ -1,3 +1,4 @@
+import { firebaseAuth } from '../../config/firebase.js';
 import { supabase } from '../../config/supabase.js';
 import type { AppUser, FirebaseUserClaims } from '../../types.js';
 import { ApiError } from '../../utils/ApiError.js';
@@ -5,6 +6,40 @@ import { ApiError } from '../../utils/ApiError.js';
 export interface UpdateAdminUserInput {
   role?: 'user' | 'admin';
   status?: 'active' | 'inactive' | 'banned';
+}
+
+export interface AdminDeleteResult {
+  deleted: boolean;
+  banned: boolean;
+  firebaseDeleted: boolean;
+  user: AppUser | null;
+  message: string;
+}
+
+type FirebaseDeleteOutcome = 'deleted' | 'already_gone' | 'failed';
+
+function firebaseErrorCode(err: unknown): string {
+  if (!err || typeof err !== 'object') return '';
+  const rec = err as { code?: string; errorInfo?: { code?: string } };
+  return rec.code ?? rec.errorInfo?.code ?? '';
+}
+
+/** Removes the Firebase Auth user so they cannot sign in (and /auth/sync cannot recreate them). */
+async function deleteFirebaseAuthUser(uid: string): Promise<FirebaseDeleteOutcome> {
+  try {
+    await firebaseAuth.revokeRefreshTokens(uid);
+  } catch {
+    // Missing SA or already-deleted user — deleteUser reports the same outcome.
+  }
+
+  try {
+    await firebaseAuth.deleteUser(uid);
+    return 'deleted';
+  } catch (err) {
+    const code = firebaseErrorCode(err);
+    if (code === 'auth/user-not-found') return 'already_gone';
+    return 'failed';
+  }
 }
 
 const TABLE = 'users';
@@ -93,7 +128,11 @@ export const usersService = {
       .single();
 
     if (error) throw new Error(`Supabase error (syncFromFirebase upsert): ${error.message}`);
-    return data as unknown as AppUser;
+    const user = data as unknown as AppUser;
+    if (user.status === 'banned') {
+      throw ApiError.forbidden('This account has been suspended');
+    }
+    return user;
   },
 
   async updateProfile(firebaseUid: string, input: UpdateProfileInput): Promise<AppUser> {
@@ -144,6 +183,89 @@ export const usersService = {
       .single();
     if (error) throw new Error(`Supabase error (adminUpdate): ${error.message}`);
     return data as unknown as AppUser;
+  },
+
+  /**
+   * Permanently remove a customer:
+   * 1. Delete Firebase Auth (so login + /auth/sync cannot recreate them).
+   * 2. Delete the Supabase row if they have no orders (cart/addresses cascade).
+   * 3. If they have orders (FK RESTRICT), keep the row and set status=banned.
+   * If Firebase delete fails (no service account), the row is banned — never dropped —
+   * otherwise the next login would insert a fresh active profile.
+   */
+  async adminDelete(userId: string, requester: AppUser): Promise<AdminDeleteResult> {
+    const { data: target, error: findError } = await supabase
+      .from(TABLE)
+      .select(PUBLIC_COLUMNS)
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (findError) throw new Error(`Supabase error (adminDelete find): ${findError.message}`);
+    if (!target) throw ApiError.notFound('User not found');
+    const user = target as unknown as AppUser;
+
+    if (user.id === requester.id) {
+      throw ApiError.badRequest('You cannot delete your own account');
+    }
+    if (user.is_super_admin) {
+      throw ApiError.forbidden('Cannot delete a super-admin');
+    }
+    if (user.role === 'admin' && !requester.is_super_admin) {
+      throw ApiError.forbidden('Only a super-admin can delete an admin');
+    }
+
+    const firebase = await deleteFirebaseAuthUser(user.firebase_uid);
+    const firebaseDeleted = firebase !== 'failed';
+
+    const { count, error: orderErr } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId);
+    if (orderErr) throw new Error(`Supabase error (adminDelete orders): ${orderErr.message}`);
+    const hasOrders = (count ?? 0) > 0;
+
+    const canHardDelete = firebaseDeleted && !hasOrders;
+    if (canHardDelete) {
+      const { error: delErr } = await supabase.from(TABLE).delete().eq('id', userId);
+      if (!delErr) {
+        return {
+          deleted: true,
+          banned: false,
+          firebaseDeleted: true,
+          user: null,
+          message: 'Customer login and profile were permanently removed.',
+        };
+      }
+    }
+
+    const { data: banned, error: banErr } = await supabase
+      .from(TABLE)
+      .update({ status: 'banned' })
+      .eq('id', userId)
+      .select(PUBLIC_COLUMNS)
+      .single();
+    if (banErr) throw new Error(`Supabase error (adminDelete ban): ${banErr.message}`);
+
+    const bannedUser = banned as unknown as AppUser;
+    if (!firebaseDeleted) {
+      return {
+        deleted: false,
+        banned: true,
+        firebaseDeleted: false,
+        user: bannedUser,
+        message:
+          'Profile is banned, but Firebase login is still active. Set FIREBASE_SERVICE_ACCOUNT_PATH (or delete the user in Firebase Console → Authentication), then delete again.',
+      };
+    }
+
+    return {
+      deleted: false,
+      banned: true,
+      firebaseDeleted: true,
+      user: bannedUser,
+      message:
+        'Login was removed. The profile was banned so order history stays in the database.',
+    };
   },
 
   /** Admin: list all users (simple pagination). */

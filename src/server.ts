@@ -1,10 +1,22 @@
 import { createApp } from './app.js';
 import { env } from './config/env.js';
+import { delhiveryBootSummary } from './lib/delhivery/config.js';
 
 const app = createApp();
 
 const server = app.listen(env.port, () => {
   console.log(`✅ ODI API running at http://localhost:${env.port} (${env.nodeEnv})`);
+  const rzMode = env.razorpay.keyId?.startsWith('rzp_live_')
+    ? 'live'
+    : env.razorpay.keyId?.startsWith('rzp_test_')
+      ? 'test'
+      : 'unset';
+  console.log(
+    `   Razorpay ${rzMode} · webhook ${env.razorpay.webhookUrl} · HMAC ${
+      env.razorpay.webhookSecret ? 'on' : 'OFF — paste RAZORPAY_WEBHOOK_SECRET from Razorpay Dashboard'
+    }`
+  );
+  console.log(`   ${delhiveryBootSummary()}`);
 });
 
 let shuttingDown = false;
