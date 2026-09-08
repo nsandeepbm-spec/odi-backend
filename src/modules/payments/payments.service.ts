@@ -1,7 +1,8 @@
 import { supabase } from '../../config/supabase.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { verifyPaymentSignature, verifyWebhookSignature } from '../../lib/razorpay.js';
+import { getRazorpayAccountSnapshot, verifyPaymentSignature, verifyWebhookSignature } from '../../lib/razorpay.js';
 import { env } from '../../config/env.js';
+import { applyStockDeltaForOrder } from '../../lib/stock.js';
 
 export class PaymentsService {
   /**
@@ -31,6 +32,16 @@ export class PaymentsService {
       throw ApiError.badRequest(`Cannot pay order in status ${order.status}`);
     }
 
+    if (
+      typeof params.amountPaise === 'number' &&
+      Number.isFinite(params.amountPaise) &&
+      params.amountPaise !== order.total_paise
+    ) {
+      throw ApiError.badRequest(
+        `Paid amount does not match order total (${params.amountPaise} vs ${order.total_paise} paise)`
+      );
+    }
+
     // Idempotent by provider_payment_id
     if (params.razorpayPaymentId) {
       const { data: existingPayment } = await supabase
@@ -44,7 +55,7 @@ export class PaymentsService {
       }
     }
 
-    const amount = params.amountPaise ?? order.total_paise;
+    const amount = order.total_paise;
 
     // Upsert payment row for this order
     const { data: paymentRows } = await supabase
@@ -88,29 +99,18 @@ export class PaymentsService {
       .select('*')
       .maybeSingle();
 
+    if (updErr) throw updErr;
+
     // Another worker won the race
     if (!updatedOrder) {
       const { data: current } = await supabase.from('orders').select('*').eq('id', order.id).single();
       return { order: current, alreadyPaid: true };
     }
-    if (updErr) throw updErr;
 
-    // Decrement stock
-    const { data: items } = await supabase
-      .from('order_items')
-      .select('product_id, quantity')
-      .eq('order_id', order.id);
-
-    for (const item of items ?? []) {
-      if (!item.product_id) continue;
-      const { data: product } = await supabase
-        .from('products')
-        .select('stock_qty')
-        .eq('id', item.product_id)
-        .single();
-      if (!product) continue;
-      const next = Math.max(0, product.stock_qty - item.quantity);
-      await supabase.from('products').update({ stock_qty: next }).eq('id', item.product_id);
+    try {
+      await applyStockDeltaForOrder(updatedOrder.id, 'decrement');
+    } catch (err) {
+      console.error('[payments] stock decrement failed after capture', updatedOrder.id, err);
     }
 
     if (order.coupon_id) {
@@ -127,7 +127,18 @@ export class PaymentsService {
       }
     }
 
+    const { cartService } = await import('../cart/cart.service.js');
+    await cartService.clear(updatedOrder.user_id).catch((err) => {
+      console.error('[payments] cart clear failed after pay', updatedOrder.id, err);
+    });
+
+    const { sendOrderPlacedEmailForOrder } = await import('../../lib/mailer/index.js');
+    sendOrderPlacedEmailForOrder(updatedOrder, false);
+
     await this.notifyOrderPaid(updatedOrder);
+
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    fulfillmentService.tryCreateShipment(updatedOrder.id);
 
     return { order: updatedOrder, alreadyPaid: false };
   }
@@ -199,14 +210,16 @@ export class PaymentsService {
   }
 
   async handleWebhook(rawBody: string, signature: string | undefined, parsed: Record<string, unknown>) {
+    if (!env.razorpay.webhookSecret) {
+      throw ApiError.badRequest(
+        'RAZORPAY_WEBHOOK_SECRET is not set. Create the webhook at RAZORPAY_WEBHOOK_URL in Razorpay Dashboard and paste that secret here.'
+      );
+    }
     if (!signature) throw ApiError.badRequest('Missing x-razorpay-signature');
 
     const valid = verifyWebhookSignature(rawBody, signature);
-    if (!valid && env.isProd) {
+    if (!valid) {
       throw ApiError.forbidden('Invalid webhook signature');
-    }
-    if (!valid && !env.isProd) {
-      console.warn('[payments] webhook signature invalid — allowing in non-production');
     }
 
     const event = String(parsed.event ?? '');
@@ -272,6 +285,7 @@ export class PaymentsService {
     return {
       payments: payments ?? [],
       kpis: { collectedPaise, pendingPaise, refundedPaise },
+      razorpay: getRazorpayAccountSnapshot(),
       meta: paginationMeta(count ?? 0, p, pp),
     };
   }

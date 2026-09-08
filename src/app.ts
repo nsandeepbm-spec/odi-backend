@@ -17,6 +17,9 @@ import ordersRoutes from './modules/orders/orders.routes.js';
 import paymentsRoutes from './modules/payments/payments.routes.js';
 import adminRoutes from './modules/admin/admin.routes.js';
 import shippingRoutes from './modules/shipping/shipping.routes.js';
+import contactRoutes from './modules/inquiries/contact.routes.js';
+import careersRoutes from './modules/inquiries/careers.routes.js';
+import legalRoutes from './modules/legal/legal.routes.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
 export function createApp() {
@@ -80,6 +83,14 @@ export function createApp() {
     message: { success: false, error: { message: 'Too many webhook requests.' } },
   });
 
+  const formLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 40,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { success: false, error: { message: 'Too many form submissions. Try again later.' } },
+  });
+
   app.use('/auth', authLimiter, authRoutes);
   app.use('/user', userRoutes);
   app.use('/users', usersRoutes);
@@ -94,6 +105,9 @@ export function createApp() {
   app.use('/payments/webhook', webhookLimiter);
   app.use('/payments', paymentsRoutes);
   app.use('/shipping', shippingRoutes);
+  app.use('/contact', formLimiter, contactRoutes);
+  app.use('/careers', formLimiter, careersRoutes);
+  app.use('/legal', legalRoutes);
   app.use('/admin', adminRoutes);
 
   app.use(notFoundHandler);

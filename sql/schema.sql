@@ -48,6 +48,9 @@ drop type if exists public.order_status cascade;
 drop type if exists public.coupon_type cascade;
 drop type if exists public.product_status cascade;
 drop type if exists public.support_ticket_status cascade;
+drop type if exists public.inquiry_status cascade;
+drop type if exists public.refund_status cascade;
+drop type if exists public.cancel_status cascade;
 
 create type public.product_status as enum ('draft', 'live', 'coming_soon', 'archived');
 create type public.coupon_type as enum ('percent', 'fixed_paise');
@@ -58,6 +61,9 @@ create type public.payment_status as enum (
   'created', 'authorized', 'captured', 'failed', 'refunded'
 );
 create type public.support_ticket_status as enum ('open', 'in_progress', 'resolved', 'closed');
+create type public.inquiry_status as enum ('new', 'in_review', 'closed');
+create type public.cancel_status as enum ('pending', 'approved', 'rejected');
+create type public.refund_status as enum ('pending', 'approved', 'rejected', 'completed');
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Users (Firebase UID → app profile)
@@ -106,10 +112,16 @@ alter table public.users enable row level security;
 -- Commerce tables (reset on re-run)
 -- ═══════════════════════════════════════════════════════════════════════════
 
+drop table if exists public.legal_pages cascade;
+drop table if exists public.legal_company cascade;
+drop table if exists public.refunds cascade;
+drop table if exists public.cancels cascade;
 drop table if exists public.payments cascade;
 drop table if exists public.order_items cascade;
 drop table if exists public.orders cascade;
 drop table if exists public.cart_items cascade;
+drop table if exists public.career_applications cascade;
+drop table if exists public.contact_inquiries cascade;
 drop table if exists public.support_tickets cascade;
 drop table if exists public.notifications cascade;
 drop table if exists public.product_notify_requests cascade;
@@ -351,6 +363,100 @@ create trigger support_tickets_touch_updated_at
   before update on public.support_tickets
   for each row execute function public.touch_updated_at();
 
+-- ── Contact inquiries (public /contact form) ────────────────────────────────
+create table public.contact_inquiries (
+  id           uuid primary key default gen_random_uuid(),
+  name         text not null,
+  email        text not null,
+  company      text,
+  service      text not null,
+  message      text not null,
+  status       public.inquiry_status not null default 'new',
+  admin_note   text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+comment on table public.contact_inquiries is
+  'Service / project inquiries from the public contact form. No email send — admin reviews in dashboard.';
+
+create index contact_inquiries_status_idx on public.contact_inquiries (status, created_at desc);
+create index contact_inquiries_created_idx on public.contact_inquiries (created_at desc);
+
+drop trigger if exists contact_inquiries_touch_updated_at on public.contact_inquiries;
+create trigger contact_inquiries_touch_updated_at
+  before update on public.contact_inquiries
+  for each row execute function public.touch_updated_at();
+
+-- ── Career applications (public /careers form) ──────────────────────────────
+create table public.career_applications (
+  id             uuid primary key default gen_random_uuid(),
+  full_name      text not null,
+  email          text not null,
+  phone          text,
+  role           text not null,
+  portfolio_url  text not null,
+  cover_note     text not null,
+  status         public.inquiry_status not null default 'new',
+  admin_note     text,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+
+comment on table public.career_applications is
+  'Job applications from the public careers form. No email send — admin reviews in dashboard.';
+
+create index career_applications_status_idx on public.career_applications (status, created_at desc);
+create index career_applications_created_idx on public.career_applications (created_at desc);
+
+drop trigger if exists career_applications_touch_updated_at on public.career_applications;
+create trigger career_applications_touch_updated_at
+  before update on public.career_applications
+  for each row execute function public.touch_updated_at();
+
+-- ── Legal pages (public /terms /privacy /cookies; admin CMS) ────────────────
+create table public.legal_company (
+  id             smallint primary key default 1 check (id = 1),
+  brand          text not null,
+  entity         text not null,
+  address        text not null,
+  gstin          text not null,
+  email          text not null,
+  phone          text not null,
+  website_href   text not null,
+  website_label  text not null,
+  updated_at     timestamptz not null default now()
+);
+
+comment on table public.legal_company is
+  'Singleton company block shown on legal pages. Seeded by the API on first read.';
+
+drop trigger if exists legal_company_touch_updated_at on public.legal_company;
+create trigger legal_company_touch_updated_at
+  before update on public.legal_company
+  for each row execute function public.touch_updated_at();
+
+create table public.legal_pages (
+  slug             text primary key check (slug in ('terms', 'privacy', 'cookies')),
+  eyebrow          text not null default 'Legal',
+  title            text not null,
+  title_accent     text not null default '',
+  intro            text not null default '',
+  effective_date   text not null,
+  last_updated     text not null,
+  sections         jsonb not null default '[]'::jsonb,
+  updated_at       timestamptz not null default now(),
+  updated_by       uuid references public.users(id) on delete set null
+);
+
+comment on table public.legal_pages is
+  'CMS copy for /terms, /privacy, /cookies. sections = [{ id, title, blocks }].';
+
+drop trigger if exists legal_pages_touch_updated_at on public.legal_pages;
+create trigger legal_pages_touch_updated_at
+  before update on public.legal_pages
+  for each row execute function public.touch_updated_at();
+
 -- ── Cart ─────────────────────────────────────────────────────────────────────
 create table public.cart_items (
   id          uuid primary key default gen_random_uuid(),
@@ -412,12 +518,22 @@ create table public.orders (
   razorpay_order_id   text unique,
   idempotency_key     text not null unique,
   paid_at             timestamptz,
+  delhivery_waybill   text,
+  delhivery_status    text,
+  delhivery_pickup_token text,
+  delhivery_pickup_date text,
+  delhivery_pickup_time text,
+  delhivery_raw       jsonb,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
 
 create index orders_user_idx on public.orders (user_id, created_at desc);
 create index orders_status_idx on public.orders (status);
+create index orders_delhivery_waybill_idx on public.orders (delhivery_waybill)
+  where delhivery_waybill is not null;
+create index orders_delhivery_pickup_date_idx on public.orders (delhivery_pickup_date desc)
+  where delhivery_pickup_token is not null;
 
 drop trigger if exists orders_touch_updated_at on public.orders;
 create trigger orders_touch_updated_at
@@ -466,9 +582,132 @@ create trigger payments_touch_updated_at
   before update on public.payments
   for each row execute function public.touch_updated_at();
 
+-- ── Cancels (customer → admin; Delhivery cancel on approve) ─────────────────
+create table public.cancels (
+  id              uuid primary key default gen_random_uuid(),
+  order_id        uuid not null references public.orders(id) on delete cascade,
+  user_id         uuid not null references public.users(id) on delete restrict,
+  order_number    text not null,
+  waybill         text,
+  amount_paise    integer not null check (amount_paise >= 0),
+  reason          text not null default '',
+  status          public.cancel_status not null default 'pending',
+  admin_note      text,
+  reviewed_by     uuid references public.users(id) on delete set null,
+  reviewed_at     timestamptz,
+  delhivery_raw   jsonb,
+  delhivery_error text,
+  delhivery_at    timestamptz,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+create unique index cancels_order_pending_uidx
+  on public.cancels (order_id)
+  where status = 'pending';
+
+create index cancels_status_idx on public.cancels (status, created_at desc);
+create index cancels_user_idx on public.cancels (user_id, created_at desc);
+
+drop trigger if exists cancels_touch_updated_at on public.cancels;
+create trigger cancels_touch_updated_at
+  before update on public.cancels
+  for each row execute function public.touch_updated_at();
+
+-- ── Refunds (after approved cancel; Razorpay refund on complete) ─────────────
+create table public.refunds (
+  id                  uuid primary key default gen_random_uuid(),
+  order_id            uuid not null references public.orders(id) on delete cascade,
+  user_id             uuid not null references public.users(id) on delete restrict,
+  cancel_id           uuid references public.cancels(id) on delete set null,
+  payment_id          uuid references public.payments(id) on delete set null,
+  order_number        text not null,
+  amount_paise        integer not null check (amount_paise > 0),
+  currency            text not null default 'INR',
+  reason              text not null default '',
+  status              public.refund_status not null default 'pending',
+  admin_note          text,
+  reviewed_by         uuid references public.users(id) on delete set null,
+  reviewed_at         timestamptz,
+  provider            text not null default 'razorpay',
+  provider_payment_id text,
+  provider_refund_id  text,
+  provider_raw        jsonb,
+  provider_error      text,
+  refunded_at         timestamptz,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+
+create unique index refunds_order_open_uidx
+  on public.refunds (order_id)
+  where status in ('pending', 'approved');
+
+create index refunds_status_idx on public.refunds (status, created_at desc);
+create index refunds_cancel_idx on public.refunds (cancel_id)
+  where cancel_id is not null;
+
+drop trigger if exists refunds_touch_updated_at on public.refunds;
+create trigger refunds_touch_updated_at
+  before update on public.refunds
+  for each row execute function public.touch_updated_at();
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- RLS deny-all (service role bypasses)
 -- ═══════════════════════════════════════════════════════════════════════════
+
+-- Atomic stock updates. Existing DBs: run sql/stock-functions.sql instead of this whole file.
+create or replace function public.decrement_product_stock(p_product_id uuid, p_qty integer)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  new_qty integer;
+begin
+  if p_qty is null or p_qty <= 0 then
+    raise exception 'quantity must be positive';
+  end if;
+  update public.products
+     set stock_qty = stock_qty - p_qty
+   where id = p_product_id
+     and stock_qty >= p_qty
+  returning stock_qty into new_qty;
+  if not found then
+    raise exception 'insufficient stock';
+  end if;
+  return new_qty;
+end;
+$$;
+
+create or replace function public.increment_product_stock(p_product_id uuid, p_qty integer)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  new_qty integer;
+begin
+  if p_qty is null or p_qty <= 0 then
+    raise exception 'quantity must be positive';
+  end if;
+  update public.products
+     set stock_qty = stock_qty + p_qty
+   where id = p_product_id
+  returning stock_qty into new_qty;
+  if not found then
+    raise exception 'product not found';
+  end if;
+  return new_qty;
+end;
+$$;
+
+revoke execute on function public.decrement_product_stock(uuid, integer) from public, anon, authenticated;
+revoke execute on function public.increment_product_stock(uuid, integer) from public, anon, authenticated;
+grant execute on function public.decrement_product_stock(uuid, integer) to service_role;
+grant execute on function public.increment_product_stock(uuid, integer) to service_role;
 
 alter table public.products enable row level security;
 alter table public.product_images enable row level security;
@@ -478,11 +717,17 @@ alter table public.user_favorites enable row level security;
 alter table public.product_notify_requests enable row level security;
 alter table public.notifications enable row level security;
 alter table public.support_tickets enable row level security;
+alter table public.contact_inquiries enable row level security;
+alter table public.career_applications enable row level security;
+alter table public.legal_company enable row level security;
+alter table public.legal_pages enable row level security;
 alter table public.cart_items enable row level security;
 alter table public.coupons enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.payments enable row level security;
+alter table public.cancels enable row level security;
+alter table public.refunds enable row level security;
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Next steps for a new environment

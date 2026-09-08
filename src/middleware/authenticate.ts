@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { firebaseAuth } from '../config/firebase.js';
+import { env } from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
 
 /**
@@ -15,7 +16,10 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
       throw ApiError.unauthorized('Missing Authorization header (expected: Bearer <idToken>)');
     }
 
-    const decoded = await firebaseAuth.verifyIdToken(token);
+    const decoded = await firebaseAuth.verifyIdToken(
+      token,
+      Boolean(env.firebase.serviceAccountPath)
+    );
 
     req.firebaseUser = {
       uid: decoded.uid,
