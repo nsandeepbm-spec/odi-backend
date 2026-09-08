@@ -7,6 +7,7 @@ import { addressesService } from '../addresses/addresses.service.js';
 import { cartService } from '../cart/cart.service.js';
 import { couponsService } from '../coupons/coupons.service.js';
 import { productsService, assertProductPurchasable } from '../products/products.service.js';
+import { shippingService } from '../shipping/shipping.service.js';
 
 type LineInput = { productId?: string; slug?: string; quantity: number };
 type ResolvedLine = { productId: string; quantity: number };
@@ -60,6 +61,9 @@ export class CheckoutService {
     }
 
     const shipping = await this.resolveShipping(userId, input);
+    const paymentKind = input.paymentMethod === 'cod' ? 'cod' : 'prepaid';
+    await shippingService.assertDeliverable(shipping.postal_code, paymentKind);
+
     const lines = await this.resolveLines(userId, input);
     const productIds = lines.map((l) => l.productId);
     const products = await productsService.getByIds(productIds);
@@ -110,7 +114,15 @@ export class CheckoutService {
       couponCode = coupon.code;
     }
 
-    const shippingPaise = 0;
+    const quote = await shippingService.quoteForProducts({
+      destinationPin: shipping.postal_code,
+      items: lines.map((line) => ({
+        product: products.find((p) => p.id === line.productId)!,
+        quantity: line.quantity,
+      })),
+      payment: paymentKind,
+    });
+    const shippingPaise = quote.shippingPaise;
     const totalPaise = Math.max(0, subtotalPaise - discountPaise + shippingPaise);
     if (totalPaise < 100) {
       throw ApiError.badRequest('Order total must be at least ₹1');
@@ -167,32 +179,21 @@ export class CheckoutService {
     );
     if (itemsError) throw itemsError;
 
-    await this.notifyOrderCreated({
-      id: order.id,
-      user_id: userId,
-      order_number: orderNumber,
-      total_paise: totalPaise,
-    });
-
     const isCod = input.paymentMethod === 'cod';
 
-    {
-      const { sendOrderPlacedEmail } = await import('../../lib/mailer/index.js');
-      const shipEmail =
-        typeof shipping.email === 'string' && shipping.email.includes('@')
-          ? shipping.email
-          : userEmail;
-      sendOrderPlacedEmail({
-        to: shipEmail,
-        name: `${shipping.first_name} ${shipping.last_name}`.trim(),
-        orderNumber,
-        totalPaise,
-        isCod,
+    if (isCod) {
+      await this.notifyOrderCreated({
+        id: order.id,
+        user_id: userId,
+        order_number: orderNumber,
+        total_paise: totalPaise,
+        isCod: true,
       });
     }
 
     if (!isCod) {
-      // Online payment: create Razorpay order + payment placeholder
+      // Online payment: create Razorpay order + payment placeholder.
+      // Do not email, decrement stock, or clear cart until payment is captured.
       const rzp = getRazorpay();
       const rzpOrder = await rzp.orders.create({
         amount: totalPaise,
@@ -215,10 +216,6 @@ export class CheckoutService {
         status: 'created',
       });
 
-      if (input.useCart) {
-        await cartService.clear(userId);
-      }
-
       return {
         orderId: order.id,
         orderNumber,
@@ -231,7 +228,23 @@ export class CheckoutService {
       };
     }
 
-    // COD: order stays 'pending'; admin marks it paid after delivery
+    // COD: order stays pending until the courier collects cash. Reserve stock now,
+    // email the customer, then create the Delhivery shipment.
+    try {
+      const { applyStockDeltaForOrder } = await import('../../lib/stock.js');
+      await applyStockDeltaForOrder(order.id, 'decrement');
+    } catch (err) {
+      await supabase.from('orders').delete().eq('id', order.id);
+      throw err;
+    }
+
+    if (couponId) {
+      const { data: coupon } = await supabase.from('coupons').select('used_count').eq('id', couponId).single();
+      if (coupon) {
+        await supabase.from('coupons').update({ used_count: coupon.used_count + 1 }).eq('id', couponId);
+      }
+    }
+
     await supabase.from('payments').insert({
       order_id: order.id,
       provider: 'cod',
@@ -240,9 +253,22 @@ export class CheckoutService {
       status: 'created',
     });
 
-    if (input.useCart) {
-      await cartService.clear(userId);
+    await cartService.clear(userId).catch((err) => {
+      console.error('[checkout] cart clear failed after COD', order.id, err);
+    });
+
+    {
+      const { sendOrderPlacedEmailForOrder } = await import('../../lib/mailer/index.js');
+      const { data: placed } = await supabase
+        .from('orders')
+        .select('id, order_number, total_paise, shipping_paise, shipping_address')
+        .eq('id', order.id)
+        .single();
+      if (placed) sendOrderPlacedEmailForOrder(placed, true, userEmail);
     }
+
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    fulfillmentService.tryCreateShipment(order.id);
 
     return {
       orderId: order.id,
@@ -332,6 +358,7 @@ export class CheckoutService {
     user_id: string;
     order_number: string;
     total_paise: number;
+    isCod: boolean;
   }) {
     const { notificationsService } = await import('../notifications/notifications.service.js');
     const amountInr = (order.total_paise / 100).toLocaleString('en-IN', {
@@ -344,7 +371,9 @@ export class CheckoutService {
       userId: order.user_id,
       type: 'order_created',
       title: 'Order placed',
-      body: `Order ${order.order_number} · ${amountInr} — complete payment to confirm.`,
+      body: order.isCod
+        ? `Order ${order.order_number} · ${amountInr} — pay cash on delivery.`
+        : `Order ${order.order_number} · ${amountInr} — complete payment to confirm.`,
       link: `/dashboard/orders/${order.id}`,
       metadata: { order_id: order.id, order_number: order.order_number },
     });

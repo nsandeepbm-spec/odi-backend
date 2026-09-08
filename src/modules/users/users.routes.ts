@@ -47,4 +47,17 @@ router.patch(
   })
 );
 
+/** DELETE /users/:id — admin: remove Firebase login + profile (or ban if they have orders) */
+router.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const userId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!userId) throw ApiError.badRequest('User ID required');
+    if (!req.user) throw ApiError.unauthorized();
+
+    const result = await usersService.adminDelete(userId, req.user);
+    res.json({ success: true, data: result });
+  })
+);
+
 export default router;

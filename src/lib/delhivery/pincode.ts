@@ -1,27 +1,33 @@
 import { ApiError } from '../../utils/ApiError.js';
 import {
   DELHIVERY_API_PATHS,
-  getDelhiveryAuthHeader,
   getDelhiveryBaseUrl,
   getDelhiveryEnvironment,
   isDelhiveryConfigured,
 } from './config.js';
+import { fetchDelhiveryGet, normalizePincode } from './client.js';
 
-/** Normalised pincode serviceability result for ODI checkout/shipping. */
+/** Exact upstream JSON shape from Delhivery pincode API. */
+export type DelhiveryPinResponse = {
+  delivery_codes?: Array<{
+    postal_code?: Record<string, unknown>;
+  }>;
+};
+
+/** Normalised pincode serviceability result + original Delhivery payload. */
 export type PincodeServiceability = {
   pincode: string;
   serviceable: boolean;
   prepaid: boolean;
   cod: boolean;
-  /** Raw Delhivery payload slice (for debugging / future fields). */
-  raw: Record<string, unknown> | null;
+  /** Unmodified JSON body from Delhivery (same as their API returns). */
+  delhivery: DelhiveryPinResponse;
+  /** Full upstream URL used for this lookup. */
+  requestUrl: string;
 };
 
-type DelhiveryPinResponse = {
-  delivery_codes?: Array<{
-    postal_code?: Record<string, unknown>;
-  }>;
-};
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const cache = new Map<string, { value: PincodeServiceability; expiresAt: number }>();
 
 function yn(value: unknown): boolean {
   if (value === true) return true;
@@ -30,87 +36,97 @@ function yn(value: unknown): boolean {
   return s === 'Y' || s === 'YES' || s === '1' || s === 'TRUE';
 }
 
-function normalizePincode(input: string): string {
-  const digits = input.replace(/\D/g, '');
-  if (digits.length !== 6) {
-    throw ApiError.badRequest('Pincode must be a 6-digit Indian postal code');
+function cacheGet(pincode: string): PincodeServiceability | null {
+  const key = `${getDelhiveryEnvironment()}:${pincode}`;
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (Date.now() > hit.expiresAt) {
+    cache.delete(key);
+    return null;
   }
-  return digits;
+  return hit.value;
+}
+
+function cacheSet(pincode: string, value: PincodeServiceability) {
+  cache.set(`${getDelhiveryEnvironment()}:${pincode}`, {
+    value,
+    expiresAt: Date.now() + CACHE_TTL_MS,
+  });
+}
+
+function logDelhiveryPincode(_requestUrl: string, _status: number, _body: DelhiveryPinResponse) {
+  // Disabled — uncomment to debug Delhivery responses in the terminal.
+  // const prefix = `[Delhivery pincode] ${getDelhiveryEnvironment()}`;
+  // console.log(`${prefix} GET ${requestUrl}`);
+  // console.log(`${prefix} HTTP ${status}`, JSON.stringify(body, null, 2));
 }
 
 /**
  * Delhivery Pin-code Serviceability API
- * GET /c/api/pin-codes/json/?filter_codes={pincode}  (production)
- * GET /c/api/pin-codes/json/?pincode={pincode}       (staging — Delhivery One B2C docs)
+ * GET /c/api/pin-codes/json/?filter_codes={pincode}
+ *
+ * Staging:    https://staging-express.delhivery.com/c/api/pin-codes/json/?filter_codes={pincode}
+ * Production: https://track.delhivery.com/c/api/pin-codes/json/?filter_codes={pincode}
  *
  * @see https://one.delhivery.com/developer-portal/document/b2c/detail/pincode-serviceability
  */
 export async function checkPincodeServiceability(pincodeInput: string): Promise<PincodeServiceability> {
   if (!isDelhiveryConfigured()) {
-    throw ApiError.internal('Delhivery is not configured (missing DELHIVERY_API_KEY)');
+    throw ApiError.internal(
+      'Delhivery is not configured — set DELHIVERY_STAGING_TOKEN (staging) or DELHIVERY_PRODUCTION_TOKEN (production)'
+    );
   }
 
   const pincode = normalizePincode(pincodeInput);
-  const base = getDelhiveryBaseUrl();
-  const envName = getDelhiveryEnvironment();
-  // Delhivery One B2C docs use ?pincode= on staging; legacy/readme uses ?filter_codes=
-  const queryKey = envName === 'staging' ? 'pincode' : 'filter_codes';
-  const url = `${base}${DELHIVERY_API_PATHS.pincodeServiceability}?${queryKey}=${encodeURIComponent(pincode)}`;
+  const cached = cacheGet(pincode);
+  if (cached) return cached;
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: 'GET',
-      headers: getDelhiveryAuthHeader(),
-    });
-  } catch (err) {
-    throw ApiError.internal('Unable to reach Delhivery pincode service', {
-      cause: err instanceof Error ? err.message : String(err),
-    });
-  }
+  const requestUrl = `${getDelhiveryBaseUrl()}${DELHIVERY_API_PATHS.pincodeServiceability}?filter_codes=${encodeURIComponent(pincode)}`;
+
+  const res = await fetchDelhiveryGet(requestUrl);
 
   if (res.status === 401) {
-    const hint =
-      getDelhiveryEnvironment() === 'staging'
-        ? ' Your token may be a production-only Delhivery One token — try DELHIVERY_ENV=production. Pincode check is read-only and does not create shipments.'
-        : ' Confirm the token in Delhivery One → Settings → API Setup matches DELHIVERY_ENV.';
     throw ApiError.internal(
-      `Delhivery authentication failed — check DELHIVERY_API_KEY and DELHIVERY_ENV.${hint}`
+      `Delhivery rejected the API token (401). Confirm DELHIVERY_STAGING_TOKEN / DELHIVERY_PRODUCTION_TOKEN matches DELHIVERY_ENV. Pincode check is read-only and does not create shipments.`
     );
   }
 
   const text = await res.text();
-  let body: DelhiveryPinResponse;
+  let delhivery: DelhiveryPinResponse;
   try {
-    body = text ? (JSON.parse(text) as DelhiveryPinResponse) : {};
+    delhivery = text ? (JSON.parse(text) as DelhiveryPinResponse) : { delivery_codes: [] };
   } catch {
-    throw ApiError.internal('Invalid response from Delhivery pincode API', { status: res.status });
+    throw ApiError.internal('Invalid response from Delhivery pincode API', {
+      status: res.status,
+      body: text.slice(0, 500),
+    });
   }
+
+  logDelhiveryPincode(requestUrl, res.status, delhivery);
 
   if (!res.ok) {
-    throw ApiError.internal('Delhivery pincode API error', { status: res.status, body });
+    throw ApiError.internal('Delhivery pincode API error', { status: res.status, delhivery });
   }
 
-  const entry = body.delivery_codes?.[0]?.postal_code ?? null;
-  if (!entry) {
-    return {
-      pincode,
-      serviceable: false,
-      prepaid: false,
-      cod: false,
-      raw: null,
-    };
-  }
+  const entry = delhivery.delivery_codes?.[0]?.postal_code ?? null;
+  const result: PincodeServiceability = !entry
+    ? {
+        pincode,
+        serviceable: false,
+        prepaid: false,
+        cod: false,
+        delhivery,
+        requestUrl,
+      }
+    : {
+        pincode,
+        serviceable: yn(entry.pre_paid ?? entry.prepaid) || yn(entry.cod),
+        prepaid: yn(entry.pre_paid ?? entry.prepaid),
+        cod: yn(entry.cod),
+        delhivery,
+        requestUrl,
+      };
 
-  const prepaid = yn(entry.pre_paid ?? entry.prepaid);
-  const cod = yn(entry.cod);
-  const serviceable = prepaid || cod;
-
-  return {
-    pincode,
-    serviceable,
-    prepaid,
-    cod,
-    raw: entry,
-  };
+  cacheSet(pincode, result);
+  return result;
 }

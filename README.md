@@ -5,8 +5,8 @@ TypeScript Express API for the ODI Kids storefront + dashboards.
 - **Auth:** Firebase Authentication (Google + email/password). Frontend sends `Authorization: Bearer <idToken>`.
 - **Database:** Supabase (Postgres) via service-role key. RLS blocks direct client access.
 - **Payments:** Razorpay (test or live keys). Orders are confirmed via signed webhook or client verify.
-- **Shipping:** Delhivery Express (staging by default). Pin-code serviceability via `GET /shipping/pincode/:pincode`.
-- **Email:** Gmail SMTP (`odistudio24@gmail.com`) — welcome, order placed, product-live. Set `SMTP_PASS` to a Google App Password.
+- **Shipping:** Delhivery Express (staging by default). Pin-code serviceability via `GET /shipping/pincode/:pincode`; expected TAT via `GET /shipping/tat/:destinationPin`; shipping cost via `GET /shipping/charges/:destinationPin`.
+- **Email:** Gmail SMTP (`odistudio24@gmail.com`) — welcome, order placed, shipped, delivered, cancelled, refund processed, product-live, support reply. Set `SMTP_PASS` to a Google App Password.
 
 ## Setup
 
@@ -24,41 +24,94 @@ npm run dev              # http://localhost:5000
    - `MAIL_FROM=ODI <odistudio24@gmail.com>`
    - `SMTP_USER=odistudio24@gmail.com`
    - `SMTP_PASS=<app-password>`
-   - `FRONTEND_URL=` your site (localhost or ngrok URL for CTA links)
+   - `FRONTEND_URL=` your site (`http://localhost:5173` locally, `https://odi.studio` in production)
+
+Logo and Instagram / Facebook / LinkedIn / YouTube links live in `src/lib/mailer/brand.ts` (public brand assets, not secrets). Do not put those URLs in `.env`.
 
 Without `SMTP_PASS`, the API still runs and logs emails to the console.
 
-### Delhivery (shipping — step 1: pincode check)
+### Firebase (permanent customer delete)
 
-1. Delhivery One → **Settings → API Setup** → copy API token (staging token for test).
-2. Set in `.env`:
+Token verify only needs `FIREBASE_PROJECT_ID`. To **delete** a customer so they cannot sign in again, the API must call Firebase Auth Admin (`deleteUser`). That needs a service account:
+
+1. [Firebase Console](https://console.firebase.google.com/) → Project settings → **Service accounts** → **Generate new private key**.
+2. Save the JSON as `odi-backend/firebase-service-account.json` (gitignored).
+3. In `.env`: `FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json`
+4. Restart the API.
+
+Admin **Customers → Edit → Delete** then removes Firebase login and the Supabase row. If the customer has orders, the row is **banned** instead (order history stays).
+
+### Delhivery (shipping)
+
+`.env` has **two full credential groups**. Keep exactly one active:
+
+| Block | Account | Host | Warehouse | Wallet |
+|-------|---------|------|-----------|--------|
+| **STAGING** (default for local) | B2B JWT | `staging-express.delhivery.com` | `ODI Staging` · Delhi `110001` | Not required |
+| **PRODUCTION** | B2C hex | `track.delhivery.com` | `ODI B2C` · Mohali `160074` | Required for AWB |
+
+**Switch:** comment the whole active block, uncomment the other. Do not mix lines (e.g. staging warehouse + production token).
 
 ```env
-# Active: staging | production
-DELHIVERY_ENV=staging
-
-# Base URLs (reference — backend resolves from DELHIVERY_ENV)
+# Shared
 DELHIVERY_STAGING_BASE_URL=https://staging-express.delhivery.com
 DELHIVERY_PRODUCTION_BASE_URL=https://track.delhivery.com
+DELHIVERY_MOT=S
+DELHIVERY_PDT=Pre-paid
 
-DELHIVERY_API_KEY=<your-staging-token>
+# --- STAGING (local QA) ---
+DELHIVERY_ENV=staging
+DELHIVERY_ACCOUNT_TYPE=b2b
+DELHIVERY_STAGING_TOKEN=<b2b-jwt>
+DELHIVERY_CLIENT_NAME=OTI B2B-b2b
+DELHIVERY_ORIGIN_PIN=110001
+DELHIVERY_PICKUP_LOCATION_NAME=ODI Staging
+# Warehouse + label return (keep return address short — city goes in DELHIVERY_WAREHOUSE_RETURN_CITY)
+DELHIVERY_WAREHOUSE_REGISTERED_NAME=ODI
+DELHIVERY_WAREHOUSE_ADDRESS=Connaught Place, New Delhi
+DELHIVERY_WAREHOUSE_CITY=New Delhi
+DELHIVERY_WAREHOUSE_STATE=Delhi
+DELHIVERY_WAREHOUSE_RETURN_ADDRESS=Connaught Place
+DELHIVERY_WAREHOUSE_RETURN_CITY=New Delhi
+# Label: Delhivery docs support 4R (4×6) and A4 (8×11). Admin UI always prints 4R from JSON.
+DELHIVERY_LABEL_PDF_SIZE=4R
+
+# --- PRODUCTION (go live; comment staging first) ---
+# DELHIVERY_ENV=production
+# DELHIVERY_ACCOUNT_TYPE=b2c
+# DELHIVERY_PRODUCTION_TOKEN=<b2c-hex>
+# DELHIVERY_CLIENT_NAME=OTI XB-cdp
+# DELHIVERY_ORIGIN_PIN=160074
+# DELHIVERY_PICKUP_LOCATION_NAME=ODI B2C
+# + warehouse address fields for Mohali
 ```
+
+After changing `.env`, restart `npm run dev`. Boot log should show `Delhivery staging b2b … pickup="ODI Staging"` or `production b2c … pickup="ODI B2C"`.
+
+Admin Shipments → **Retry Shipment** / **Request Pickup** against the active env. Register the warehouse in Delhivery One for the same env/token the API uses.
 
 3. Pincode API path (built by backend): `{ACTIVE_BASE}/c/api/pin-codes/json/?filter_codes={pincode}`
 
-Test: `GET http://localhost:5000/shipping/pincode/110001`
+4. Expected TAT path: `{ACTIVE_BASE}/api/dc/expected_tat?origin_pin={DELHIVERY_ORIGIN_PIN}&destination_pin={pin}&mot={DELHIVERY_MOT}`
+
+5. Shipping charges path: `{ACTIVE_BASE}/api/kinko/v1/invoice/charges/.json?md={MOT}&ss=Delivered&o_pin={ORIGIN}&d_pin={pin}&cgm={grams}&pt=Pre-paid`
+
+6. **Fulfillment** (after payment): Fetch Waybill + `POST /api/cmu/create.json` — automatic; stores `orders.delhivery_waybill` and sets status `processing`.
+
+Test:
+- `GET http://localhost:5000/shipping/pincode/110001`
+- `GET http://localhost:5000/shipping/tat/136118`
+- `GET http://localhost:5000/shipping/charges/136118?slug=space-explorer&quantity=1`
 
 ### SQL (run once in Supabase SQL Editor)
 
-Run **`sql/schema.sql`** — single source of truth for users + commerce (products, images, reviews, favorites, notify-me waitlist, addresses, cart, coupons, orders, payments).
+Run **`sql/schema.sql`** — single source of truth for users + commerce (products, images, reviews, favorites, notify-me waitlist, notifications, support tickets, contact inquiries, career applications, legal pages, addresses, cart, coupons, orders, payments, cancels, refunds).
 
-**Warning:** re-running drops and recreates commerce tables (wipes catalog/orders). Safe on empty projects only.
+**Warning:** re-running drops and recreates commerce tables (wipes catalog/orders). Safe on empty projects only. Do not re-run on a live DB that already has data.
 
-**Existing DB (additive):** if you already ran an older schema, run:
-- `sql/004_product_notify_requests.sql` — Notify Me waitlist
-- `sql/006_notifications_clear_and_support.sql` — `cleared_at` on notifications + `support_tickets`
-- `sql/007_product_shipping_dimensions.sql` — parcel weight/dimensions on `products`
+**Existing databases:** copy **`sql/stock-functions.sql`** into the Supabase SQL Editor and Run. `CREATE OR REPLACE` is safe — it does not drop tables. Checkout uses these for atomic stock; without them the API falls back to a non-atomic update.
 
+**Legal pages (existing DBs):** copy **`sql/legal-pages.sql`** into the SQL Editor and Run. Safe to re-run. The API seeds official Terms / Privacy / Cookies copy on first `GET /legal/:slug`.
 
 After first sign-in, promote yourself:
 
@@ -110,6 +163,8 @@ Response shape: `{ success, data }` or `{ success: false, error: { message } }`.
 | POST | `/user/support-tickets` | Bearer | Create support ticket |
 | GET | `/user/reviews` | Bearer | List signed-in user's reviews |
 | GET | `/users` | Admin | List customers |
+| PATCH | `/users/:id` | Admin | Update role / status |
+| DELETE | `/users/:id` | Admin | Delete Firebase login + profile (or ban if they have orders) |
 | GET | `/products` | — | Catalog (`?category=&q=&page=&perPage=`) |
 | GET | `/products/:slug` | — | Product + images + rating summary |
 | GET | `/products/:slug/reviews` | — | Paginated reviews |
@@ -123,12 +178,26 @@ Response shape: `{ success, data }` or `{ success: false, error: { message } }`.
 | PATCH | `/cart/items/:productId` | Bearer | Set quantity |
 | DELETE | `/cart/items/:productId` | Bearer | Remove item |
 | POST | `/coupons/validate` | Bearer | Preview discount `{ code, items? }` |
-| POST | `/checkout/sessions` | Bearer + `Idempotency-Key` | Create pending order + Razorpay order |
-| GET | `/orders` | Bearer | My orders |
+| POST | `/checkout/sessions` | Bearer + `Idempotency-Key` | Create pending order + Razorpay order (validates Delhivery PIN) |
+| GET | `/orders` | Bearer | My orders (`refund_status`, `razorpay_refund_id`) |
 | GET | `/orders/:id` | Bearer | Order detail + items + payments |
+| GET | `/orders/:id/tracking` | Bearer | Live Delhivery status + scans (owner) |
+| GET | `/orders/:id/cancel` | Bearer | Latest cancel request (owner) |
+| POST | `/orders/:id/cancel` | Bearer | Create cancel request |
+| GET | `/orders/:id/refund` | Bearer | Latest refund request (owner) |
 | POST | `/payments/webhook` | Razorpay signature | Mark paid (idempotent) |
 | POST | `/payments/verify` | Bearer | Client signature verify after Checkout |
 | GET | `/shipping/pincode/:pincode` | none | Delhivery pin-code serviceability |
+| GET | `/shipping/tat/:destinationPin` | none | Delhivery expected TAT (origin → destination) |
+| GET | `/shipping/charges/:destinationPin` | none | Delhivery shipping cost (`?slug&quantity`) |
+| POST | `/contact` | none | Save contact / service inquiry (no email) |
+| POST | `/careers` | none | Save career application (no email) |
+| GET | `/legal/:slug` | none | Legal CMS page + company (`terms` \| `privacy` \| `cookies`) |
+| POST | `/admin/mail/welcome` | Admin | Send welcome email (`{ to?, sent, mode }`) |
+| POST | `/admin/mail/refund` | Admin | Send refund email (`{ to?, orderNumber?, amountPaise?, sent, mode }`) |
+| POST | `/admin/mail/order` | Admin | Send order-placed email (`{ to?, sent, mode }`) |
+| POST | `/admin/mail/product-live` | Admin | Send product-live email (`{ to?, sent, mode }`) |
+| POST | `/admin/mail/cancel` | Admin | Send order-cancelled email (`{ to?, sent, mode }`) |
 | GET | `/admin/overview` | Admin | KPIs, revenue series, catalog snapshot, recent orders |
 | GET | `/admin/products` | Admin | Catalog list (`?page&perPage&status&q`) |
 | GET | `/admin/products/:id` | Admin | Single product (editor) |
@@ -185,10 +254,30 @@ All product responses use the same serializer (`products.presenter.ts`).
 | GET | `/admin/orders` | Admin | All orders |
 | GET | `/admin/orders/:id` | Admin | Order detail + items + payments + user |
 | PATCH | `/admin/orders/:id/status` | Admin | Update fulfillment status |
+| POST | `/admin/orders/:id/shipment` | Admin | Retry Delhivery create (auto also runs after payment) |
+| GET | `/admin/pickups` | Admin | Needs + scheduled pickup rows (date/time) |
+| GET | `/admin/orders/:id/shipping-label` | Admin | Delhivery PDF proxy (optional; UI renders from `/packing-slip`) |
+| GET | `/admin/orders/:id/packing-slip` | Admin | Packing slip JSON (not used for Label button) |
+| GET | `/admin/orders/:id/tracking` | Admin | Live Delhivery status + scans |
+| POST | `/admin/orders/:id/pickup` | Admin | Manual Delhivery pickup request |
 | GET | `/admin/payments` | Admin | Payment list + KPIs |
 | GET | `/admin/payments/:id` | Admin | Payment detail + linked order + user |
+| GET | `/admin/cancels` | Admin | Cancel Management list |
+| PATCH | `/admin/cancels/:id` | Admin | Approve (Delhivery cancel + queue refund) / reject |
+| GET | `/admin/refunds` | Admin | Refund Management list |
+| GET | `/admin/refunds/:id` | Admin | Refund request detail |
+| PATCH | `/admin/refunds/:id` | Admin | Approve = Razorpay `POST /v1/payments/:id/refund` (amount in paise); reject closes without payout |
 | GET | `/admin/support-tickets` | Admin | Customer support tickets |
 | PATCH | `/admin/support-tickets/:id` | Admin | Update ticket status / note |
+| GET | `/admin/contact-inquiries` | Admin | Public contact form submissions |
+| PATCH | `/admin/contact-inquiries/:id` | Admin | Update inquiry status / note |
+| GET | `/admin/career-applications` | Admin | Public careers form submissions |
+| PATCH | `/admin/career-applications/:id` | Admin | Update application status / note |
+| GET | `/admin/legal` | Admin | Legal pages list + company card |
+| GET | `/admin/legal/:slug` | Admin | One legal page + company |
+| PUT | `/admin/legal/:slug` | Admin | Update legal page copy |
+| POST | `/admin/legal/:slug/restore` | Admin | Restore official seeded copy |
+| PUT | `/admin/legal/company` | Admin | Update company card on legal pages |
 
 ### Checkout session body
 
@@ -232,16 +321,37 @@ Firebase sign-in
   → GET /user/me (later calls)
 ```
 
+Deleting the Supabase `users` row is **not** a full delete. Firebase Auth is the login. `POST /auth/sync` inserts a new profile if the Firebase user still exists. Use admin `DELETE /users/:id` (needs `FIREBASE_SERVICE_ACCOUNT_PATH`) or delete the user in Firebase Console → Authentication as well.
+
 ## Checkout / payment flow
 
 ```
-POST /checkout/sessions  → pending order + Razorpay order (prices from DB)
-Frontend Razorpay modal  → customer pays
-POST /payments/verify    → HMAC check → mark paid + decrement stock
+POST /checkout/sessions  → pending order
+  razorpay: Razorpay order only (no email / stock / cart clear yet)
+  cod:      reserve stock + email + clear cart + Delhivery COD shipment
+Frontend Razorpay modal  → customer pays (UPI / card / netbanking inside Razorpay)
+POST /payments/verify    → HMAC (timing-safe) + amount check → mark paid + stock + email + clear cart
   and/or
-POST /payments/webhook   → same idempotent mark-paid path
+POST /payments/webhook   → same idempotent mark-paid path (requires RAZORPAY_WEBHOOK_SECRET)
 GET  /orders/:id         → poll status
 ```
+
+### Razorpay webhook (required)
+
+Razorpay calls **one public URL** — `RAZORPAY_WEBHOOK_URL` (default `https://odi.studio/payments/webhook`). It cannot reach `localhost`. Local checkout still confirms via `POST /payments/verify` after the Razorpay modal.
+
+`RAZORPAY_WEBHOOK_SECRET` is **not invented in `.env`**. Create the webhook in the Razorpay Dashboard, then paste the secret Razorpay shows into `.env`. HMAC is always verified (invalid signature is rejected).
+
+**Create it**
+
+1. [Razorpay Dashboard](https://dashboard.razorpay.com/) → **Test Mode** or **Live Mode** (must match `RAZORPAY_KEY_ID`: `rzp_test_` vs `rzp_live_`).
+2. **Account & Settings → Webhooks → Add New Webhook**.
+3. **URL:** `https://odi.studio/payments/webhook` (same URL for Test and Live). Production must reverse-proxy `/payments` to this Express API.
+4. **Secret:** copy the secret Razorpay generates → paste as `RAZORPAY_WEBHOOK_SECRET` in `.env`.
+5. Events: `payment.captured`, `order.paid`, `payment.failed`, `refund.processed`, `refund.failed`.
+6. Restart the API. Use **Send test event** in the dashboard; logs should show `POST /payments/webhook 200`.
+
+**Refunds vs Collected:** Admin Payments **Collected** is the sum of captured rows in our DB. Razorpay pays refunds from merchant **Available balance / refund credits**, which is often ₹0 in Test Mode until more test payments settle.
 
 ## Project structure
 
@@ -265,10 +375,14 @@ src/
 │   ├── checkout/
 │   ├── orders/
 │   ├── payments/
+│   ├── inquiries/     POST /contact + /careers
+│   ├── legal/         GET /legal/:slug + admin CMS
 │   └── admin/
 └── utils/
 sql/
-└── schema.sql   # full DB schema (run once in Supabase SQL Editor)
+├── schema.sql          # full DB schema (run once in Supabase SQL Editor)
+├── legal-pages.sql     # existing DBs: legal_company + legal_pages
+└── stock-functions.sql # existing DBs: paste into SQL Editor for atomic stock RPCs
 ```
 
 ## Scripts
