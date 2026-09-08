@@ -1,6 +1,6 @@
 import { supabase } from '../../config/supabase.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { productsService } from '../products/products.service.js';
+import { productsService, assertProductPurchasable } from '../products/products.service.js';
 
 export class CartService {
   async getCart(userId: string) {
@@ -62,17 +62,26 @@ export class CartService {
       return sum + price * item.quantity;
     }, 0);
 
+    const staleIds = items
+      .filter((item) => !item.product || item.product.status !== 'live')
+      .map((item) => item.product_id);
+
+    if (staleIds.length > 0) {
+      await supabase.from('cart_items').delete().eq('user_id', userId).in('product_id', staleIds);
+      const live = items.filter((item) => item.product?.status === 'live');
+      const liveSubtotal = live.reduce((sum, item) => {
+        const price = item.product?.price_paise ?? 0;
+        return sum + price * item.quantity;
+      }, 0);
+      return { items: live, subtotal_paise: liveSubtotal, currency: 'INR' };
+    }
+
     return { items, subtotal_paise, currency: 'INR' };
   }
 
   async addItem(userId: string, productId: string, quantity: number) {
     const product = await productsService.getById(productId);
-    if (!product || product.status !== 'live') {
-      throw ApiError.badRequest('Product is not available');
-    }
-    if (product.stock_qty < quantity) {
-      throw ApiError.badRequest('Insufficient stock');
-    }
+    assertProductPurchasable(product, quantity);
 
     const { data: existing } = await supabase
       .from('cart_items')
@@ -103,12 +112,7 @@ export class CartService {
 
   async updateItem(userId: string, productId: string, quantity: number) {
     const product = await productsService.getById(productId);
-    if (!product || product.status !== 'live') {
-      throw ApiError.badRequest('Product is not available');
-    }
-    if (product.stock_qty < quantity) {
-      throw ApiError.badRequest('Insufficient stock');
-    }
+    assertProductPurchasable(product, quantity);
 
     const { data, error } = await supabase
       .from('cart_items')
@@ -151,13 +155,8 @@ export class CartService {
     }
 
     for (const item of items) {
-      const product = products.find((p) => p.id === item.productId)!;
-      if (product.status !== 'live') {
-        throw ApiError.badRequest(`${product.name} is not available`);
-      }
-      if (product.stock_qty < item.quantity) {
-        throw ApiError.badRequest(`Insufficient stock for ${product.name}`);
-      }
+      const product = products.find((p) => p.id === item.productId);
+      assertProductPurchasable(product, item.quantity);
     }
 
     const { error } = await supabase.from('cart_items').insert(

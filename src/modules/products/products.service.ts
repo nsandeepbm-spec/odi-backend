@@ -322,4 +322,25 @@ export class ProductsService {
   }
 }
 
+/**
+ * DB `products.status` is the source of truth. Only `live` + stock may be sold.
+ * Standalone (not a class method) so TypeScript allows the `asserts` signature.
+ */
+export function assertProductPurchasable(
+  product: ProductRow | null | undefined,
+  qty = 1,
+): asserts product is ProductRow {
+  if (!product) throw ApiError.notFound('Product not found');
+  if (product.status !== 'live') {
+    throw ApiError.badRequest(
+      product.status === 'coming_soon'
+        ? `${product.name} is coming soon and cannot be purchased yet`
+        : `${product.name} is not available for purchase`
+    );
+  }
+  if (product.stock_qty < qty) {
+    throw ApiError.badRequest(`Insufficient stock for ${product.name}`);
+  }
+}
+
 export const productsService = new ProductsService();

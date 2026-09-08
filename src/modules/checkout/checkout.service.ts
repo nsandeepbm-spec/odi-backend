@@ -6,8 +6,7 @@ import { getRazorpay } from '../../lib/razorpay.js';
 import { addressesService } from '../addresses/addresses.service.js';
 import { cartService } from '../cart/cart.service.js';
 import { couponsService } from '../coupons/coupons.service.js';
-import { productsService } from '../products/products.service.js';
-import type { ProductRow } from '../products/products.types.js';
+import { productsService, assertProductPurchasable } from '../products/products.service.js';
 
 type LineInput = { productId?: string; slug?: string; quantity: number };
 type ResolvedLine = { productId: string; quantity: number };
@@ -84,7 +83,7 @@ export class CheckoutService {
 
     for (const line of lines) {
       const product = products.find((p) => p.id === line.productId)!;
-      this.assertPurchasable(product, line.quantity);
+      assertProductPurchasable(product, line.quantity);
       const lineTotal = product.price_paise * line.quantity;
       subtotalPaise += lineTotal;
       orderItems.push({
@@ -255,15 +254,6 @@ export class CheckoutService {
       isCod: true,
       reused: false,
     };
-  }
-
-  private assertPurchasable(product: ProductRow, qty: number) {
-    if (product.status !== 'live') {
-      throw ApiError.badRequest(`${product.name} is not available for purchase`);
-    }
-    if (product.stock_qty < qty) {
-      throw ApiError.badRequest(`Insufficient stock for ${product.name}`);
-    }
   }
 
   private async resolveShipping(
