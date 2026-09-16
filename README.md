@@ -180,7 +180,7 @@ Response shape: `{ success, data }` or `{ success: false, error: { message } }`.
 | POST | `/coupons/validate` | Bearer | Preview discount `{ code, items? }` |
 | POST | `/checkout/sessions` | Bearer + `Idempotency-Key` | Create pending order + Razorpay order (validates Delhivery PIN) |
 | GET | `/orders` | Bearer | My orders (`refund_status`, `razorpay_refund_id`) |
-| GET | `/orders/:id` | Bearer | Order detail + items + payments |
+| GET | `/orders/:id` | Bearer | Order detail + items + payments (`method`: upi/card/netbanking/cod when known) |
 | GET | `/orders/:id/tracking` | Bearer | Live Delhivery status + scans (owner) |
 | GET | `/orders/:id/cancel` | Bearer | Latest cancel request (owner) |
 | POST | `/orders/:id/cancel` | Bearer | Create cancel request |
@@ -252,7 +252,7 @@ All product responses use the same serializer (`products.presenter.ts`).
 | Method | Path | Auth | Notes |
 | --- | --- | --- | --- |
 | GET | `/admin/orders` | Admin | All orders |
-| GET | `/admin/orders/:id` | Admin | Order detail + items + payments + user |
+| GET | `/admin/orders/:id` | Admin | Order detail + items + payments (`method` when known) + user |
 | PATCH | `/admin/orders/:id/status` | Admin | Update fulfillment status |
 | POST | `/admin/orders/:id/shipment` | Admin | Retry Delhivery create (auto also runs after payment) |
 | GET | `/admin/pickups` | Admin | Needs + scheduled pickup rows (date/time) |

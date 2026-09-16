@@ -47,6 +47,27 @@ function withRefundFields(
   };
 }
 
+function instrumentFromWebhook(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const root = raw as Record<string, unknown>;
+  const payload = root.payload as Record<string, unknown> | undefined;
+  const payment = (payload?.payment ?? root.payment) as Record<string, unknown> | undefined;
+  const entity = (payment?.entity ?? root.entity) as Record<string, unknown> | undefined;
+  const method = entity?.method ?? payment?.method ?? root.method;
+  return typeof method === 'string' && method.trim() ? method.trim().toLowerCase() : null;
+}
+
+function presentPayments(rows: Array<Record<string, unknown>> | null | undefined) {
+  return (rows ?? []).map((row) => {
+    const { raw_webhook: rawWebhook, ...rest } = row;
+    const provider = typeof rest.provider === 'string' ? rest.provider.toLowerCase() : '';
+    return {
+      ...rest,
+      method: provider === 'cod' ? 'cod' : instrumentFromWebhook(rawWebhook),
+    };
+  });
+}
+
 export class OrdersService {
   async listForUser(userId: string, page = 1, perPage = 20) {
     const p = clampPage(page);
@@ -93,7 +114,7 @@ export class OrdersService {
 
     const { data: payments } = await supabase
       .from('payments')
-      .select('id, provider, provider_order_id, provider_payment_id, amount_paise, status, created_at')
+      .select('id, provider, provider_order_id, provider_payment_id, amount_paise, status, created_at, raw_webhook')
       .eq('order_id', orderId)
       .order('created_at', { ascending: false });
 
@@ -101,7 +122,7 @@ export class OrdersService {
     return {
       order: withRefundFields(order as Record<string, unknown>, refunds.get(orderId)),
       items: items ?? [],
-      payments: payments ?? [],
+      payments: presentPayments(payments as Array<Record<string, unknown>> | null),
     };
   }
 
@@ -142,7 +163,7 @@ export class OrdersService {
         .eq('order_id', orderId),
       supabase
         .from('payments')
-        .select('id, provider, provider_order_id, provider_payment_id, amount_paise, status, created_at')
+        .select('id, provider, provider_order_id, provider_payment_id, amount_paise, status, created_at, raw_webhook')
         .eq('order_id', orderId)
         .order('created_at', { ascending: false }),
       supabase
@@ -152,7 +173,12 @@ export class OrdersService {
         .maybeSingle(),
     ]);
 
-    return { order, items: items ?? [], payments: payments ?? [], user: user ?? null };
+    return {
+      order,
+      items: items ?? [],
+      payments: presentPayments(payments as Array<Record<string, unknown>> | null),
+      user: user ?? null,
+    };
   }
 
   async updateStatus(orderId: string, status: string) {
