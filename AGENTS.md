@@ -131,12 +131,12 @@ See `.env.example`.
 2. Module `*.schema.ts` / `*.service.ts` / `*.routes.ts` (+ presenter when returning a shared DTO).
 3. Mount in `app.ts` **only if** no existing path already covers the capability.
 4. Update root **[`api.md`](../api.md)** with method, auth, request, and full response — **required**.
-5. Update `README.md` route table + `.env.example` if needed.
+5. Update `README.md` only for setup/env/SQL/scripts (ops). **Do not** add full route catalogs to `README.md` (it ships with backend pushes). Update `.env.example` if needed.
 6. Update this file if conventions change.
 
 **Rules:**
 
-- Code without `api.md` + README updates is incomplete.
+- Code without `api.md` updates is incomplete. README ops notes only when setup/env changes.
 - **Do not invent duplicate endpoints** for the same job (see `api.md` → Anti-patterns).
 - Prefer extending the domain’s managed API (e.g. `/admin/products`, `/products`) over new parallel paths.
 
