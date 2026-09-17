@@ -524,6 +524,8 @@ create table public.orders (
   delhivery_pickup_date text,
   delhivery_pickup_time text,
   delhivery_raw       jsonb,
+  /** Null for normal orders. `payment_abandoned` = unpaid Razorpay checkout expired (not a customer cancel). */
+  payment_close_reason text,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
@@ -728,6 +730,14 @@ alter table public.order_items enable row level security;
 alter table public.payments enable row level security;
 alter table public.cancels enable row level security;
 alter table public.refunds enable row level security;
+
+-- Idempotent column for existing production DBs (also defined on create table above).
+alter table public.orders
+  add column if not exists payment_close_reason text;
+
+create index if not exists orders_unpaid_online_pending_idx
+  on public.orders (created_at)
+  where status = 'pending' and razorpay_order_id is not null;
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Next steps for a new environment

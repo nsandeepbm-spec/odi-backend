@@ -29,7 +29,14 @@ export class PaymentsService {
       return { order, alreadyPaid: true };
     }
     if (order.status === 'cancelled' || order.status === 'refunded') {
-      throw ApiError.badRequest(`Cannot pay order in status ${order.status}`);
+      // Rare: money captured after silent abandon expire — still honor the payment.
+      const abandoned =
+        order.status === 'cancelled' &&
+        (order as { payment_close_reason?: string | null }).payment_close_reason ===
+          'payment_abandoned';
+      if (!abandoned) {
+        throw ApiError.badRequest(`Cannot pay order in status ${order.status}`);
+      }
     }
 
     if (
@@ -91,13 +98,30 @@ export class PaymentsService {
       });
     }
 
-    const { data: updatedOrder, error: updErr } = await supabase
+    const isAbandonedCancel =
+      order.status === 'cancelled' &&
+      (order as { payment_close_reason?: string | null }).payment_close_reason === 'payment_abandoned';
+
+    let statusFilter = supabase
       .from('orders')
-      .update({ status: 'paid', paid_at: new Date().toISOString() })
-      .eq('id', order.id)
-      .eq('status', 'pending')
-      .select('*')
-      .maybeSingle();
+      .update({
+        status: 'paid',
+        paid_at: new Date().toISOString(),
+        payment_close_reason: null,
+      })
+      .eq('id', order.id);
+
+    if (order.status === 'pending') {
+      statusFilter = statusFilter.eq('status', 'pending');
+    } else if (isAbandonedCancel) {
+      statusFilter = statusFilter
+        .eq('status', 'cancelled')
+        .eq('payment_close_reason', 'payment_abandoned');
+    } else {
+      throw ApiError.badRequest(`Cannot pay order in status ${order.status}`);
+    }
+
+    const { data: updatedOrder, error: updErr } = await statusFilter.select('*').maybeSingle();
 
     if (updErr) throw updErr;
 
