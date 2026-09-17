@@ -47,6 +47,12 @@ export class CheckoutService {
       .maybeSingle();
 
     if (existing) {
+      // Only reuse an open unpaid checkout. Abandoned/cancelled keys are rewritten on expire.
+      if (existing.status !== 'pending') {
+        throw ApiError.badRequest(
+          'This checkout session is no longer open. Refresh the payment page and try again.'
+        );
+      }
       const existingIsCod = !existing.razorpay_order_id;
       return {
         orderId: existing.id,
@@ -154,10 +160,15 @@ export class CheckoutService {
         // Race on idempotency — re-fetch
         const { data: raced } = await supabase
           .from('orders')
-          .select('id, order_number, total_paise, currency, razorpay_order_id')
+          .select('id, order_number, total_paise, currency, razorpay_order_id, status')
           .eq('idempotency_key', idempotencyKey)
           .single();
         if (raced) {
+          if (raced.status !== 'pending') {
+            throw ApiError.badRequest(
+              'This checkout session is no longer open. Refresh the payment page and try again.'
+            );
+          }
           const racedIsCod = !raced.razorpay_order_id;
           return {
             orderId: raced.id,

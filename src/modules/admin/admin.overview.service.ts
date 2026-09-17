@@ -1,4 +1,5 @@
 import { supabase } from '../../config/supabase.js';
+import { ordersService } from '../orders/orders.service.js';
 
 const REVENUE_STATUSES = new Set(['paid', 'processing', 'shipped', 'delivered']);
 
@@ -10,6 +11,8 @@ type OrderRow = {
   shipping_address: Record<string, unknown> | null;
   user_id: string;
   created_at: string;
+  razorpay_order_id?: string | null;
+  payment_close_reason?: string | null;
 };
 
 type ProductSnap = {
@@ -35,11 +38,17 @@ function monthLabel(key: string) {
 
 export class AdminOverviewService {
   async getOverview() {
+    await ordersService.expireAbandonedOnlinePending().catch((err) => {
+      console.error('[admin/overview] expire abandoned', err);
+    });
+
     const [{ data: orders, error: ordersErr }, { data: products, error: productsErr }, customers] =
       await Promise.all([
         supabase
           .from('orders')
-          .select('id, order_number, status, total_paise, shipping_address, user_id, created_at')
+          .select(
+            'id, order_number, status, total_paise, shipping_address, user_id, created_at, razorpay_order_id, payment_close_reason'
+          )
           .order('created_at', { ascending: false })
           .limit(500),
         supabase
@@ -58,14 +67,24 @@ export class AdminOverviewService {
 
     const paidLike = orderRows.filter((o) => REVENUE_STATUSES.has(o.status));
     const revenuePaise = paidLike.reduce((sum, o) => sum + (o.total_paise ?? 0), 0);
-    const attentionCount = orderRows.filter(
-      (o) => o.status === 'pending' || o.status === 'processing' || o.status === 'paid'
-    ).length;
 
-    const userIds = [...new Set(orderRows.slice(0, 8).map((o) => o.user_id))];
+    // Real work queue: skip unpaid Razorpay attempts and abandoned payment rows.
+    const attentionCount = orderRows.filter((o) => {
+      if (o.payment_close_reason === 'payment_abandoned') return false;
+      if (o.status === 'pending' && o.razorpay_order_id) return false;
+      return o.status === 'pending' || o.status === 'processing' || o.status === 'paid';
+    }).length;
+
+    const visibleRecent = orderRows.filter(
+      (o) =>
+        o.payment_close_reason !== 'payment_abandoned' &&
+        !(o.status === 'pending' && o.razorpay_order_id)
+    );
+
+    const userIds = [...new Set(visibleRecent.slice(0, 8).map((o) => o.user_id))];
     const userMap = await this.userMap(userIds);
 
-    const recentOrders = orderRows.slice(0, 8).map((o) => {
+    const recentOrders = visibleRecent.slice(0, 8).map((o) => {
       const ship = o.shipping_address ?? {};
       const first = typeof ship.first_name === 'string' ? ship.first_name : '';
       const last = typeof ship.last_name === 'string' ? ship.last_name : '';
@@ -103,7 +122,7 @@ export class AdminOverviewService {
     return {
       kpis: {
         revenuePaise,
-        orderCount: orderRows.length,
+        orderCount: orderRows.filter((o) => o.payment_close_reason !== 'payment_abandoned').length,
         paidOrderCount: paidLike.length,
         attentionCount,
         customerCount: customers,
