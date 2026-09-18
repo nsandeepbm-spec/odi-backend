@@ -15,6 +15,17 @@ export const validateCouponSchema = z
   })
   .strict();
 
+export const listOffersQuerySchema = z
+  .object({
+    productId: z.string().uuid().optional(),
+    slug: z.string().min(1).max(120).optional(),
+    quantity: z.coerce.number().int().min(1).max(10).optional().default(1),
+  })
+  .strict()
+  .refine((v) => Boolean(v.productId || v.slug), {
+    message: 'Provide productId or slug',
+  });
+
 const couponBaseObject = z.object({
   code: z.string().min(2).max(40).regex(/^[A-Z0-9_-]+$/i, 'Code must be alphanumeric'),
   type: z.enum(['percent', 'fixed_paise']),
@@ -26,6 +37,11 @@ const couponBaseObject = z.object({
   starts_at: z.string().datetime({ offset: true }).optional().nullable(),
   ends_at: z.string().datetime({ offset: true }).optional().nullable(),
   active: z.boolean().optional().default(true),
+  is_public: z.boolean().optional().default(false),
+  title: z.string().max(120).optional().nullable(),
+  description: z.string().max(500).optional().nullable(),
+  /** Empty / omitted = store-wide. Otherwise only these product UUIDs. */
+  productIds: z.array(z.string().uuid()).max(50).optional().default([]),
 }).strict();
 
 export const createCouponAdminSchema = couponBaseObject.refine(
