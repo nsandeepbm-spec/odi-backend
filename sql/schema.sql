@@ -489,17 +489,32 @@ create table public.coupons (
   starts_at           timestamptz,
   ends_at             timestamptz,
   active              boolean not null default true,
+  /** When true, coupon appears in checkout "View offers" list. */
+  is_public           boolean not null default false,
+  title               text,
+  description         text,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now(),
   constraint coupons_percent_max check (type <> 'percent' or value <= 100)
 );
 
 create index coupons_code_idx on public.coupons (lower(code));
+create index coupons_public_active_idx on public.coupons (is_public, active)
+  where is_public = true and active = true;
 
 drop trigger if exists coupons_touch_updated_at on public.coupons;
 create trigger coupons_touch_updated_at
   before update on public.coupons
   for each row execute function public.touch_updated_at();
+
+-- Empty set = store-wide. Rows = coupon only valid when every cart product is listed.
+create table public.coupon_products (
+  coupon_id   uuid not null references public.coupons(id) on delete cascade,
+  product_id  uuid not null references public.products(id) on delete cascade,
+  primary key (coupon_id, product_id)
+);
+
+create index coupon_products_product_idx on public.coupon_products (product_id);
 
 -- ── Orders (UI may say “bookings”) ───────────────────────────────────────────
 create table public.orders (
@@ -725,6 +740,7 @@ alter table public.legal_company enable row level security;
 alter table public.legal_pages enable row level security;
 alter table public.cart_items enable row level security;
 alter table public.coupons enable row level security;
+alter table public.coupon_products enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.payments enable row level security;

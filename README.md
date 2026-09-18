@@ -68,6 +68,8 @@ Run **`sql/schema.sql`** — single source of truth for users + commerce.
 
 If the DB already exists, also run **`sql/migrate-payment-close-reason.sql`** once (adds `orders.payment_close_reason` for abandoned unpaid online checkouts).
 
+For checkout coupon offers, run **`sql/migrate-coupon-offers.sql`** once (`coupons.is_public` / title / description + `coupon_products`).
+
 **Warning:** re-running drops and recreates commerce tables. Safe on empty projects only. Do not re-run on a live DB with data.
 
 **Existing databases:**

@@ -114,6 +114,10 @@ export class CheckoutService {
     if (input.couponCode?.trim()) {
       const coupon = await couponsService.findByCode(input.couponCode);
       if (!coupon) throw ApiError.notFound('Coupon not found');
+      await couponsService.assertProductScope(
+        coupon.id,
+        lines.map((l) => l.productId)
+      );
       await couponsService.assertUsable(coupon, userId, subtotalPaise);
       discountPaise = computeDiscountPaise(coupon, subtotalPaise);
       couponId = coupon.id;
