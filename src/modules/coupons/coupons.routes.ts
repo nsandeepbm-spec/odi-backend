@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { loadUser } from '../../middleware/loadUser.js';
+import { optionalAuthenticate, optionalLoadUser } from '../../middleware/optionalAuth.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { couponsService } from './coupons.service.js';
@@ -8,10 +9,11 @@ import { listOffersQuerySchema, validateCouponSchema } from './coupons.schema.js
 
 const router = Router();
 
+/** Public list of checkout offers — guests OK. Apply still requires auth via /validate. */
 router.get(
   '/offers',
-  authenticate,
-  loadUser,
+  optionalAuthenticate,
+  optionalLoadUser,
   asyncHandler(async (req, res) => {
     const parsed = listOffersQuerySchema.safeParse({
       productId: typeof req.query.productId === 'string' ? req.query.productId : undefined,
@@ -21,7 +23,7 @@ router.get(
     if (!parsed.success) {
       throw ApiError.badRequest('Invalid offers query', parsed.error.flatten().fieldErrors);
     }
-    const result = await couponsService.listPublicOffers(req.user!.id, parsed.data);
+    const result = await couponsService.listPublicOffers(req.user?.id ?? null, parsed.data);
     res.json({ success: true, data: result });
   })
 );

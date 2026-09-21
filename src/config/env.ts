@@ -83,9 +83,9 @@ export const env = {
     keyId: optional('RAZORPAY_KEY_ID'),
     keySecret: optional('RAZORPAY_KEY_SECRET'),
     /** Paste from Razorpay Dashboard → Webhooks (must match the webhook secret there). */
-    webhookSecret: optional('RAZORPAY_WEBHOOK_SECRET'),
-    /** Public HTTPS URL Razorpay calls. Same for Test and Live: https://odi.studio/payments/webhook */
-    webhookUrl: (optional('RAZORPAY_WEBHOOK_URL') ?? 'https://odi.studio/payments/webhook').replace(
+    webhookSecret: optional('RAZORPAY_WEBHOOK_SECRET')?.replace(/^["']|["']$/g, '') ?? null,
+    /** Public HTTPS URL Razorpay calls. Prefer API host: https://api.odi.studio/payments/webhook */
+    webhookUrl: (optional('RAZORPAY_WEBHOOK_URL') ?? 'https://api.odi.studio/payments/webhook').replace(
       /\/$/,
       ''
     ),
