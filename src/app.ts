@@ -41,8 +41,10 @@ export function createApp() {
     express.json({
       limit: '1mb',
       verify: (req, _res, buf) => {
-        if (req.url?.startsWith('/payments/webhook')) {
-          (req as { rawBody?: string }).rawBody = buf.toString('utf8');
+        const r = req as { originalUrl?: string; url?: string; rawBody?: string };
+        const path = `${r.originalUrl || r.url || ''}`.split('?')[0];
+        if (path === '/payments/webhook' || path.endsWith('/payments/webhook')) {
+          r.rawBody = buf.toString('utf8');
         }
       },
     })

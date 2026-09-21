@@ -117,7 +117,7 @@ Order status: `pending → paid → processing → shipped → delivered` (also 
 
 Required: `FIREBASE_PROJECT_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
-Payments: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_URL` (`https://odi.studio/payments/webhook`), `RAZORPAY_WEBHOOK_SECRET` (paste from Razorpay Dashboard — do not invent).
+Payments: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_URL` (`https://api.odi.studio/payments/webhook`), `RAZORPAY_WEBHOOK_SECRET` (paste from Razorpay Dashboard — do not invent).
 
 Optional: `SUPABASE_STORAGE_BUCKET=product-images`, `TRUST_PROXY`, `CORS_ORIGIN`, `FRONTEND_URL`, `MAIL_FROM`, `SMTP_*` (Gmail App Password for `odistudio24@gmail.com`).
 

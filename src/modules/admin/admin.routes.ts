@@ -264,6 +264,27 @@ router.patch(
   })
 );
 
+/**
+ * POST /admin/orders/:id/sync-payment
+ * Reconcile: if Razorpay already captured, mark ODI order paid (fixes Incomplete payment).
+ */
+router.post(
+  '/orders/:id/sync-payment',
+  asyncHandler(async (req, res) => {
+    const { paymentsService } = await import('../payments/payments.service.js');
+    const result = await paymentsService.syncOrderPaymentFromRazorpay(param(req.params.id, 'id'));
+    res.json({
+      success: true,
+      data: {
+        order: result.order,
+        alreadyPaid: result.alreadyPaid,
+        synced: result.synced,
+        razorpayPaymentId: result.razorpayPaymentId ?? null,
+      },
+    });
+  })
+);
+
 /** POST /admin/orders/:id/shipment — internal/retry only (auto-runs after payment). */
 router.post(
   '/orders/:id/shipment',

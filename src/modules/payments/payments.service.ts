@@ -347,6 +347,59 @@ export class PaymentsService {
       user,
     };
   }
+
+  /**
+   * Admin reconcile: if Razorpay already captured money but ODI order is still pending,
+   * pull the payment and mark the order paid (same path as verify/webhook).
+   */
+  async syncOrderPaymentFromRazorpay(orderId: string) {
+    const { data: order, error } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', orderId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!order) throw ApiError.notFound('Order not found');
+
+    if (
+      order.status === 'paid' ||
+      order.status === 'processing' ||
+      order.status === 'shipped' ||
+      order.status === 'delivered'
+    ) {
+      return { order, alreadyPaid: true, synced: false };
+    }
+
+    const razorpayOrderId = order.razorpay_order_id as string | null;
+    if (!razorpayOrderId) {
+      throw ApiError.badRequest(
+        'This order has no Razorpay order id (COD or payment never started). Nothing to sync.'
+      );
+    }
+
+    const { fetchCapturedPaymentForRazorpayOrder } = await import('../../lib/razorpay.js');
+    const captured = await fetchCapturedPaymentForRazorpayOrder(razorpayOrderId);
+    if (!captured) {
+      throw ApiError.badRequest(
+        'No captured payment found on Razorpay for this order yet. If the customer was charged, wait a minute and try again, or check the Razorpay Dashboard.'
+      );
+    }
+
+    const result = await this.markOrderPaid({
+      razorpayOrderId,
+      razorpayPaymentId: captured.paymentId,
+      amountPaise: captured.amountPaise,
+      rawWebhook: { source: 'admin_sync', payment: captured.raw },
+    });
+
+    return {
+      order: result.order,
+      alreadyPaid: result.alreadyPaid,
+      synced: !result.alreadyPaid,
+      razorpayPaymentId: captured.paymentId,
+    };
+  }
 }
 
 export const paymentsService = new PaymentsService();
