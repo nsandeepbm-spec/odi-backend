@@ -181,9 +181,10 @@ export class CouponsService {
 
   /**
    * Public checkout offers for a product. Soft eligibility — never trusts client for discount.
+   * `userId` optional: guests see offers; signed-in users get per-user “already used” checks.
    */
   async listPublicOffers(
-    userId: string,
+    userId: string | null,
     opts: { productId?: string; slug?: string; quantity: number }
   ) {
     let productId = opts.productId ?? null;
@@ -234,19 +235,21 @@ export class CouponsService {
     const now = Date.now();
     const offers = [];
 
-    // One query for all redemption counts (avoid N+1 round-trips that stall the modal)
-    const { data: redemptionRows, error: redErr } = await supabase
-      .from('orders')
-      .select('coupon_id')
-      .eq('user_id', userId)
-      .in('coupon_id', couponIds)
-      .in('status', ['paid', 'processing', 'shipped', 'delivered']);
-    if (redErr) throw redErr;
-
     const usedByCoupon = new Map<string, number>();
-    for (const row of redemptionRows ?? []) {
-      const cid = row.coupon_id as string;
-      usedByCoupon.set(cid, (usedByCoupon.get(cid) ?? 0) + 1);
+    if (userId) {
+      // One query for all redemption counts (avoid N+1)
+      const { data: redemptionRows, error: redErr } = await supabase
+        .from('orders')
+        .select('coupon_id')
+        .eq('user_id', userId)
+        .in('coupon_id', couponIds)
+        .in('status', ['paid', 'processing', 'shipped', 'delivered']);
+      if (redErr) throw redErr;
+
+      for (const row of redemptionRows ?? []) {
+        const cid = row.coupon_id as string;
+        usedByCoupon.set(cid, (usedByCoupon.get(cid) ?? 0) + 1);
+      }
     }
 
     for (const coupon of coupons) {
@@ -271,7 +274,7 @@ export class CouponsService {
         eligible = false;
         const need = coupon.min_subtotal_paise - subtotalPaise;
         reason = `Shop for ₹${(need / 100).toFixed(0)} more to apply`;
-      } else {
+      } else if (userId) {
         const used = usedByCoupon.get(coupon.id) ?? 0;
         if (used >= coupon.per_user_limit) {
           eligible = false;
@@ -279,6 +282,8 @@ export class CouponsService {
         } else {
           discount_preview_paise = computeDiscountPaise(coupon, subtotalPaise);
         }
+      } else {
+        discount_preview_paise = computeDiscountPaise(coupon, subtotalPaise);
       }
 
       offers.push({

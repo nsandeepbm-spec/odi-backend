@@ -85,6 +85,7 @@ type RazorpayPayment = {
   refund_status?: string | null;
   currency?: string;
   method?: string;
+  order_id?: string;
 };
 
 type RazorpayRefund = {
@@ -92,6 +93,11 @@ type RazorpayRefund = {
   status?: string;
   amount?: number;
   payment_id?: string;
+};
+
+type RazorpayPaymentCollection = {
+  items?: RazorpayPayment[];
+  count?: number;
 };
 
 function requireRazorpayKeys(): { keyId: string; keySecret: string } {
@@ -263,4 +269,31 @@ export async function createRazorpayRefund(params: {
     }
     throw new Error(message);
   }
+}
+
+/**
+ * Look up a captured (or authorized) payment for a Razorpay order.
+ * Used by admin sync when Checkout verify / webhook missed marking the ODI order paid.
+ */
+export async function fetchCapturedPaymentForRazorpayOrder(razorpayOrderId: string): Promise<{
+  paymentId: string;
+  amountPaise: number | undefined;
+  status: string;
+  raw: RazorpayPayment;
+} | null> {
+  const list = await razorpayFetch<RazorpayPaymentCollection>(
+    'GET',
+    `/orders/${encodeURIComponent(razorpayOrderId)}/payments`
+  );
+  const items = list.items ?? [];
+  const captured =
+    items.find((p) => p.status === 'captured' || p.captured === true) ??
+    items.find((p) => p.status === 'authorized');
+  if (!captured?.id) return null;
+  return {
+    paymentId: captured.id,
+    amountPaise: typeof captured.amount === 'number' ? captured.amount : undefined,
+    status: captured.status ?? (captured.captured ? 'captured' : 'unknown'),
+    raw: captured,
+  };
 }
