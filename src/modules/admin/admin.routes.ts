@@ -222,7 +222,11 @@ router.get(
     const result = await ordersService.listAdmin(
       Number(req.query.page ?? 1),
       Number(req.query.perPage ?? 20),
-      typeof req.query.status === 'string' ? req.query.status : undefined
+      typeof req.query.status === 'string' ? req.query.status : undefined,
+      {
+        from: typeof req.query.from === 'string' ? req.query.from : undefined,
+        to: typeof req.query.to === 'string' ? req.query.to : undefined,
+      }
     );
     res.json({ success: true, data: result });
   })
@@ -517,6 +521,104 @@ router.patch(
     const { inquiriesService } = await import('../inquiries/inquiries.service.js');
     const application = await inquiriesService.updateCareerAdmin(param(req.params.id), parsed.data);
     res.json({ success: true, data: { application } });
+  })
+);
+
+/** GET /admin/bulk-orders */
+router.get(
+  '/bulk-orders',
+  asyncHandler(async (req, res) => {
+    const { listBulkOrdersQuerySchema } = await import('../bulk-orders/bulk-orders.schema.js');
+    const parsed = listBulkOrdersQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid query', parsed.error.flatten().fieldErrors);
+    }
+    const { bulkOrdersService } = await import('../bulk-orders/bulk-orders.service.js');
+    const result = await bulkOrdersService.list(parsed.data.page, parsed.data.perPage, {
+      paymentStatus: parsed.data.paymentStatus,
+      q: parsed.data.q,
+      from: parsed.data.from,
+      to: parsed.data.to,
+    });
+    res.json({ success: true, data: result });
+  })
+);
+
+/** POST /admin/bulk-orders — create bulk/offline sale (no Delhivery) */
+router.post(
+  '/bulk-orders',
+  asyncHandler(async (req, res) => {
+    const { createBulkOrderSchema } = await import('../bulk-orders/bulk-orders.schema.js');
+    const parsed = createBulkOrderSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid bulk order', parsed.error.flatten().fieldErrors);
+    }
+    const { bulkOrdersService } = await import('../bulk-orders/bulk-orders.service.js');
+    const detail = await bulkOrdersService.create(req.user!.id, parsed.data);
+    res.status(201).json({ success: true, data: detail });
+  })
+);
+
+/** GET /admin/bulk-orders/:id */
+router.get(
+  '/bulk-orders/:id',
+  asyncHandler(async (req, res) => {
+    const { bulkOrdersService } = await import('../bulk-orders/bulk-orders.service.js');
+    const detail = await bulkOrdersService.getDetail(param(req.params.id));
+    res.json({ success: true, data: detail });
+  })
+);
+
+/** PATCH /admin/bulk-orders/:id/mark-paid — record offline collection (Cash/UPI/etc.) */
+router.patch(
+  '/bulk-orders/:id/mark-paid',
+  asyncHandler(async (req, res) => {
+    const { markBulkOrderPaidSchema } = await import('../bulk-orders/bulk-orders.schema.js');
+    const parsed = markBulkOrderPaidSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid mark-paid payload', parsed.error.flatten().fieldErrors);
+    }
+    const { bulkOrdersService } = await import('../bulk-orders/bulk-orders.service.js');
+    const detail = await bulkOrdersService.markPaid(param(req.params.id), req.user!.id, parsed.data);
+    res.json({ success: true, data: detail });
+  })
+);
+
+/** GET /admin/reviews — all product reviews */
+router.get(
+  '/reviews',
+  asyncHandler(async (req, res) => {
+    const page = typeof req.query.page === 'string' ? Number(req.query.page) : 1;
+    const perPage = typeof req.query.perPage === 'string' ? Number(req.query.perPage) : 20;
+    const productSlug = typeof req.query.productSlug === 'string' ? req.query.productSlug : undefined;
+    const { reviewsService } = await import('../reviews/reviews.service.js');
+    const result = await reviewsService.listAdmin(page, perPage, productSlug);
+    res.json({ success: true, data: result });
+  })
+);
+
+/** PATCH /admin/reviews/:id — edit any customer review */
+router.patch(
+  '/reviews/:id',
+  asyncHandler(async (req, res) => {
+    const { updateReviewSchema } = await import('../reviews/reviews.schema.js');
+    const parsed = updateReviewSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest('Invalid review update', parsed.error.flatten().fieldErrors);
+    }
+    const { reviewsService } = await import('../reviews/reviews.service.js');
+    const review = await reviewsService.update(param(req.params.id), req.user!.id, parsed.data, true);
+    res.json({ success: true, data: { review } });
+  })
+);
+
+/** DELETE /admin/reviews/:id — remove any customer review */
+router.delete(
+  '/reviews/:id',
+  asyncHandler(async (req, res) => {
+    const { reviewsService } = await import('../reviews/reviews.service.js');
+    await reviewsService.remove(param(req.params.id), true);
+    res.json({ success: true, data: { deleted: true } });
   })
 );
 

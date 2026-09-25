@@ -7,7 +7,7 @@ import { param } from '../../lib/params.js';
 import { reviewsService } from './reviews.service.js';
 import { updateReviewSchema } from './reviews.schema.js';
 
-/** Mounted at /reviews — own review edit/delete */
+/** Mounted at /reviews — customer edit own; admin edit/delete any */
 const router = Router();
 
 router.patch(
@@ -19,7 +19,13 @@ router.patch(
     if (!parsed.success) {
       throw ApiError.badRequest('Invalid review update', parsed.error.flatten().fieldErrors);
     }
-    const review = await reviewsService.update(param(req.params.id), req.user!.id, parsed.data);
+    const isAdmin = req.user!.role === 'admin';
+    const review = await reviewsService.update(
+      param(req.params.id),
+      req.user!.id,
+      parsed.data,
+      isAdmin
+    );
     res.json({ success: true, data: { review } });
   })
 );
@@ -29,7 +35,8 @@ router.delete(
   authenticate,
   loadUser,
   asyncHandler(async (req, res) => {
-    await reviewsService.remove(param(req.params.id), req.user!.id, req.user!.role === 'admin');
+    const isAdmin = req.user!.role === 'admin';
+    await reviewsService.remove(param(req.params.id), isAdmin);
     res.json({ success: true, data: { deleted: true } });
   })
 );

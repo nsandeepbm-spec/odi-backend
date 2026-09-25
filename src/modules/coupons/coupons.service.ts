@@ -90,7 +90,7 @@ export class CouponsService {
     }
   }
 
-  assertUsable(coupon: CouponRow, userId: string, subtotalPaise: number) {
+  async assertUsable(coupon: CouponRow, userId: string | null, subtotalPaise: number) {
     if (!coupon.active) throw ApiError.badRequest('Coupon is inactive');
 
     const now = Date.now();
@@ -109,11 +109,13 @@ export class CouponsService {
       );
     }
 
-    return this.countUserRedemptions(coupon.id, userId).then((count) => {
-      if (count >= coupon.per_user_limit) {
-        throw ApiError.badRequest('You have already used this coupon');
-      }
-    });
+    // Guests can preview apply; per-user limit is checked once they sign in / at checkout.
+    if (!userId) return;
+
+    const count = await this.countUserRedemptions(coupon.id, userId);
+    if (count >= coupon.per_user_limit) {
+      throw ApiError.badRequest('You have already used this coupon');
+    }
   }
 
   async countUserRedemptions(couponId: string, userId: string) {
@@ -129,7 +131,7 @@ export class CouponsService {
   }
 
   private async resolveLineProducts(
-    userId: string,
+    userId: string | null,
     items?: { productId: string; quantity: number }[]
   ): Promise<{ productIds: string[]; subtotalPaise: number }> {
     if (items?.length) {
@@ -147,6 +149,10 @@ export class CouponsService {
       return { productIds, subtotalPaise };
     }
 
+    if (!userId) {
+      throw ApiError.badRequest('Provide items to preview a coupon');
+    }
+
     const cart = await cartService.getCart(userId);
     return {
       productIds: cart.items.map((i) => i.product_id as string).filter(Boolean),
@@ -154,8 +160,12 @@ export class CouponsService {
     };
   }
 
+  /**
+   * Preview discount for a code. Guests OK when `items` are sent (no cart).
+   * Checkout session still re-validates with a signed-in user before charging.
+   */
   async validateForUser(
-    userId: string,
+    userId: string | null,
     code: string,
     items?: { productId: string; quantity: number }[]
   ) {

@@ -198,7 +198,20 @@ export function sendOrderDeliveredEmailForOrder(order: {
   void (async () => {
     const to = await emailForUserId(order.user_id, order.shipping_address);
     if (!to) return;
-    const mail = orderDeliveredEmail({ orderId: order.id, orderNumber: order.order_number });
+
+    const { data: items } = await supabase
+      .from('order_items')
+      .select('snapshot_slug, snapshot_name')
+      .eq('order_id', order.id)
+      .limit(1);
+
+    const first = items?.[0] as { snapshot_slug?: string | null; snapshot_name?: string | null } | undefined;
+    const mail = orderDeliveredEmail({
+      orderId: order.id,
+      orderNumber: order.order_number,
+      reviewProductSlug: first?.snapshot_slug ?? null,
+      reviewProductName: first?.snapshot_name ?? null,
+    });
     sendMailSafe({ to, ...mail });
   })();
 }

@@ -9,10 +9,11 @@ type OrderRow = {
   status: string;
   total_paise: number;
   shipping_address: Record<string, unknown> | null;
-  user_id: string;
+  user_id: string | null;
   created_at: string;
   razorpay_order_id?: string | null;
   payment_close_reason?: string | null;
+  channel?: string | null;
 };
 
 type ProductSnap = {
@@ -36,6 +37,36 @@ function monthLabel(key: string) {
   return new Date(y, m - 1, 1).toLocaleString('en-IN', { month: 'short' });
 }
 
+function dayKey(iso: string) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function dayKeyFromDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function dayLabel(key: string) {
+  const [y, m, day] = key.split('-').map(Number);
+  return new Date(y, m - 1, day).toLocaleString('en-IN', { day: 'numeric', month: 'short' });
+}
+
+function weekKey(iso: string) {
+  const d = new Date(iso);
+  return weekKeyFromDate(d);
+}
+
+function weekKeyFromDate(d: Date) {
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  start.setDate(start.getDate() - start.getDay());
+  return dayKeyFromDate(start);
+}
+
+function weekLabel(key: string) {
+  const [y, m, day] = key.split('-').map(Number);
+  return `W ${new Date(y, m - 1, day).toLocaleString('en-IN', { day: 'numeric', month: 'short' })}`;
+}
+
 export class AdminOverviewService {
   async getOverview() {
     await ordersService.expireAbandonedOnlinePending().catch((err) => {
@@ -44,10 +75,11 @@ export class AdminOverviewService {
 
     const [{ data: orders, error: ordersErr }, { data: products, error: productsErr }, customers] =
       await Promise.all([
+        // Include ONLINE + BULK_OFFLINE so offline/bulk revenue counts in KPIs.
         supabase
           .from('orders')
           .select(
-            'id, order_number, status, total_paise, shipping_address, user_id, created_at, razorpay_order_id, payment_close_reason'
+            'id, order_number, status, total_paise, shipping_address, user_id, created_at, razorpay_order_id, payment_close_reason, channel'
           )
           .order('created_at', { ascending: false })
           .limit(500),
@@ -72,6 +104,7 @@ export class AdminOverviewService {
     const attentionCount = orderRows.filter((o) => {
       if (o.payment_close_reason === 'payment_abandoned') return false;
       if (o.status === 'pending' && o.razorpay_order_id) return false;
+      // Bulk pending (awaiting offline collection) counts as attention work.
       return o.status === 'pending' || o.status === 'processing' || o.status === 'paid';
     }).length;
 
@@ -81,22 +114,33 @@ export class AdminOverviewService {
         !(o.status === 'pending' && o.razorpay_order_id)
     );
 
-    const userIds = [...new Set(visibleRecent.slice(0, 8).map((o) => o.user_id))];
+    const userIds = [
+      ...new Set(
+        visibleRecent
+          .slice(0, 8)
+          .map((o) => o.user_id)
+          .filter((id): id is string => Boolean(id))
+      ),
+    ];
     const userMap = await this.userMap(userIds);
 
     const recentOrders = visibleRecent.slice(0, 8).map((o) => {
       const ship = o.shipping_address ?? {};
+      const org = typeof ship.organization_name === 'string' ? ship.organization_name.trim() : '';
       const first = typeof ship.first_name === 'string' ? ship.first_name : '';
       const last = typeof ship.last_name === 'string' ? ship.last_name : '';
       const shipEmail = typeof ship.email === 'string' ? ship.email : null;
-      const user = userMap.get(o.user_id);
+      const user = o.user_id ? userMap.get(o.user_id) : undefined;
+      const personName = [first, last].filter(Boolean).join(' ');
       return {
         id: o.id,
         orderNumber: o.order_number,
         status: o.status,
         totalPaise: o.total_paise,
         createdAt: o.created_at,
-        customerName: [first, last].filter(Boolean).join(' ') || user?.full_name || 'Customer',
+        channel: o.channel ?? 'ONLINE',
+        customerName:
+          org || personName || user?.full_name || (o.channel === 'BULK_OFFLINE' ? 'Bulk buyer' : 'Customer'),
         customerEmail: shipEmail || user?.email || null,
       };
     });
@@ -117,7 +161,7 @@ export class AdminOverviewService {
       };
     });
 
-    const revenueSeries = this.buildRevenueSeries(paidLike);
+    const revenuePack = this.buildAllRevenueSeries(paidLike);
 
     return {
       kpis: {
@@ -125,23 +169,27 @@ export class AdminOverviewService {
         orderCount: orderRows.filter((o) => o.payment_close_reason !== 'payment_abandoned').length,
         paidOrderCount: paidLike.length,
         attentionCount,
-        customerCount: customers,
+        customerCount: customers.active,
+        totalCustomerCount: customers.total,
         liveProductCount: productRows.filter((p) => p.status === 'live').length,
         productCount: productRows.length,
       },
-      revenueSeries,
+      revenueGranularity: revenuePack.defaultGranularity,
+      revenueSeries: revenuePack.series[revenuePack.defaultGranularity],
+      revenueSeriesBy: revenuePack.series,
       catalog,
       recentOrders,
     };
   }
 
-  private async countCustomers() {
-    const { count, error } = await supabase
-      .from('users')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'active');
-    if (error) throw error;
-    return count ?? 0;
+  private async countCustomers(): Promise<{ active: number; total: number }> {
+    const [activeRes, totalRes] = await Promise.all([
+      supabase.from('users').select('id', { count: 'exact', head: true }).eq('status', 'active'),
+      supabase.from('users').select('id', { count: 'exact', head: true }),
+    ]);
+    if (activeRes.error) throw activeRes.error;
+    if (totalRes.error) throw totalRes.error;
+    return { active: activeRes.count ?? 0, total: totalRes.count ?? 0 };
   }
 
   private async userMap(ids: string[]) {
@@ -175,25 +223,62 @@ export class AdminOverviewService {
     return map;
   }
 
-  private buildRevenueSeries(orders: OrderRow[]) {
-    const buckets = new Map<string, number>();
+  /**
+   * Always build day / week / month series so the admin UI can switch views.
+   * Default picks day when volume is sparse (avoids empty months).
+   */
+  private buildAllRevenueSeries(orders: OrderRow[]): {
+    defaultGranularity: 'day' | 'week' | 'month';
+    series: {
+      day: { month: string; revenuePaise: number }[];
+      week: { month: string; revenuePaise: number }[];
+      month: { month: string; revenuePaise: number }[];
+    };
+  } {
+    const now = new Date();
+    const dayBuckets = new Map<string, number>();
+    const weekBuckets = new Map<string, number>();
+    const monthBuckets = new Map<string, number>();
+
     for (const o of orders) {
-      const key = monthKey(o.created_at);
-      buckets.set(key, (buckets.get(key) ?? 0) + o.total_paise);
+      const dKey = dayKey(o.created_at);
+      const wKey = weekKey(o.created_at);
+      const mKey = monthKey(o.created_at);
+      dayBuckets.set(dKey, (dayBuckets.get(dKey) ?? 0) + o.total_paise);
+      weekBuckets.set(wKey, (weekBuckets.get(wKey) ?? 0) + o.total_paise);
+      monthBuckets.set(mKey, (monthBuckets.get(mKey) ?? 0) + o.total_paise);
     }
 
-    // Last 7 calendar months (including empty)
-    const now = new Date();
-    const series: { month: string; revenuePaise: number }[] = [];
+    const day: { month: string; revenuePaise: number }[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const key = dayKeyFromDate(d);
+      day.push({ month: dayLabel(key), revenuePaise: dayBuckets.get(key) ?? 0 });
+    }
+
+    const week: { month: string; revenuePaise: number }[] = [];
+    for (let i = 7; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i * 7);
+      const key = weekKeyFromDate(d);
+      week.push({ month: weekLabel(key), revenuePaise: weekBuckets.get(key) ?? 0 });
+    }
+
+    const month: { month: string; revenuePaise: number }[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      series.push({
-        month: monthLabel(key),
-        revenuePaise: buckets.get(key) ?? 0,
-      });
+      month.push({ month: monthLabel(key), revenuePaise: monthBuckets.get(key) ?? 0 });
     }
-    return series;
+
+    let defaultGranularity: 'day' | 'week' | 'month' = 'month';
+    if (orders.length > 0) {
+      const oldestMs = Math.min(...orders.map((o) => new Date(o.created_at).getTime()));
+      const spanDays = Math.max(1, (now.getTime() - oldestMs) / 86_400_000);
+      if (orders.length <= 12 || spanDays <= 28) defaultGranularity = 'day';
+      else if (spanDays <= 90) defaultGranularity = 'week';
+    }
+
+    return { defaultGranularity, series: { day, week, month } };
   }
 }
 

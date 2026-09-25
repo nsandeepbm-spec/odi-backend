@@ -111,7 +111,12 @@ export class CheckoutService {
     let couponId: string | null = null;
     let couponCode: string | null = null;
 
+    const isCod = input.paymentMethod === 'cod';
+
     if (input.couponCode?.trim()) {
+      if (isCod) {
+        throw ApiError.badRequest('Coupons apply to online payment only — not Cash on Delivery');
+      }
       const coupon = await couponsService.findByCode(input.couponCode);
       if (!coupon) throw ApiError.notFound('Coupon not found');
       await couponsService.assertProductScope(
@@ -193,8 +198,6 @@ export class CheckoutService {
       orderItems.map((item) => ({ ...item, order_id: order.id }))
     );
     if (itemsError) throw itemsError;
-
-    const isCod = input.paymentMethod === 'cod';
 
     if (isCod) {
       await this.notifyOrderCreated({

@@ -70,6 +70,8 @@ If the DB already exists, also run **`sql/migrate-payment-close-reason.sql`** on
 
 For checkout coupon offers, run **`sql/migrate-coupon-offers.sql`** once (`coupons.is_public` / title / description + `coupon_products`).
 
+For admin **Bulk / Offline orders**, run **`sql/migrate-bulk-offline-orders.sql`** once (`orders.channel`, `tax_paise`, bulk fields; nullable `user_id`). Bulk orders never call Delhivery.
+
 **Warning:** re-running drops and recreates commerce tables. Safe on empty projects only. Do not re-run on a live DB with data.
 
 **Existing databases:**

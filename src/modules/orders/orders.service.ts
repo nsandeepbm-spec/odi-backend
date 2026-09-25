@@ -234,9 +234,18 @@ export class OrdersService {
     };
   }
 
-  async listAdmin(page = 1, perPage = 20, status?: string) {
+  async listAdmin(
+    page = 1,
+    perPage = 20,
+    status?: string,
+    range?: { from?: string; to?: string }
+  ) {
     await this.expireAbandonedOnlinePending().catch((err) => {
       console.error('[orders] expire on listAdmin', err);
+    });
+    const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+    await fulfillmentService.syncActiveShipments().catch((err) => {
+      console.warn('[orders] delivery sync', err instanceof Error ? err.message : err);
     });
 
     const p = clampPage(page);
@@ -244,11 +253,17 @@ export class OrdersService {
     const from = (p - 1) * pp;
     const to = from + pp - 1;
 
+    // Include ONLINE + BULK_OFFLINE (bulk never goes through Delhivery).
     let qb = supabase
       .from('orders')
       .select('*, order_items(*), payments(*)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(from, to);
+
+    const dateFrom = range?.from && /^\d{4}-\d{2}-\d{2}$/.test(range.from) ? range.from : undefined;
+    const dateTo = range?.to && /^\d{4}-\d{2}-\d{2}$/.test(range.to) ? range.to : undefined;
+    if (dateFrom) qb = qb.gte('created_at', `${dateFrom}T00:00:00+05:30`);
+    if (dateTo) qb = qb.lte('created_at', `${dateTo}T23:59:59.999+05:30`);
 
     if (status === 'incomplete_payment') {
       qb = qb.eq('status', 'pending').not('razorpay_order_id', 'is', null);
@@ -298,11 +313,13 @@ export class OrdersService {
         .select('id, provider, provider_order_id, provider_payment_id, amount_paise, status, created_at, raw_webhook')
         .eq('order_id', orderId)
         .order('created_at', { ascending: false }),
-      supabase
-        .from('users')
-        .select('id, email, full_name, avatar_url, phone, role, status')
-        .eq('id', order.user_id)
-        .maybeSingle(),
+      order.user_id
+        ? supabase
+            .from('users')
+            .select('id, email, full_name, avatar_url, phone, role, status')
+            .eq('id', order.user_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
     ]);
 
     return {
@@ -343,6 +360,10 @@ export class OrdersService {
     if (!data) throw ApiError.internal('Order status was not saved');
 
     if (existing.status !== status) {
+      if (status === 'delivered') {
+        const { fulfillmentService } = await import('../fulfillment/fulfillment.service.js');
+        await fulfillmentService.settleCodPaymentOnDelivered(orderId);
+      }
       await this.notifyStatusChange(data);
     }
 

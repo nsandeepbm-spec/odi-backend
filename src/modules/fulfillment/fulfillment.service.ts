@@ -12,6 +12,11 @@ import {
   resolvePickupSchedule,
 } from '../../lib/delhivery/pickup-schedule.js';
 import { productsService } from '../products/products.service.js';
+import {
+  deliveryStageFromDelhivery,
+  isDeliveredShipment,
+  promotedOrderStatus,
+} from '../../lib/delhivery/delivery-stage.js';
 
 type ShippingAddress = {
   first_name?: string;
@@ -25,6 +30,8 @@ type ShippingAddress = {
 };
 
 export class FulfillmentService {
+  /** Avoid hammering Delhivery on every admin list refresh. */
+  private lastBulkSyncAt = 0;
   /**
    * Create Delhivery shipment for an order (waybill left blank → Delhivery auto-assigns).
    * Idempotent when `delhivery_waybill` already exists.
@@ -34,6 +41,10 @@ export class FulfillmentService {
     const { data: order, error } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
     if (error) throw error;
     if (!order) throw ApiError.notFound('Order not found');
+
+    if (order.channel === 'BULK_OFFLINE') {
+      throw ApiError.badRequest('Bulk / offline orders do not use delivery or shipping');
+    }
 
     if (order.delhivery_waybill) {
       return { order, reused: true };
@@ -130,7 +141,7 @@ export class FulfillmentService {
     return { order: finalOrder, reused: false, waybill: result.waybill };
   }
 
-  /** Fire-and-forget — never blocks checkout or payment. */
+  /** Fire-and-forget — never blocks checkout or payment. Skips bulk/offline orders. */
   tryCreateShipment(orderId: string) {
     void this.createShipmentForOrder(orderId)
       .then((result) => {
@@ -148,6 +159,10 @@ export class FulfillmentService {
       })
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
+        if (/bulk\s*\/\s*offline/i.test(message)) {
+          console.info('[fulfillment] skip shipment for bulk/offline order', orderId);
+          return;
+        }
         const details =
           err && typeof err === 'object' && 'details' in err
             ? (err as { details?: unknown }).details
@@ -161,6 +176,9 @@ export class FulfillmentService {
     const { data: order, error } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
     if (error) throw error;
     if (!order) throw ApiError.notFound('Order not found');
+    if (order.channel === 'BULK_OFFLINE') {
+      throw ApiError.badRequest('Bulk / offline orders do not use delivery or shipping');
+    }
 
     const waybill = typeof order.delhivery_waybill === 'string' ? order.delhivery_waybill.trim() : '';
     if (!waybill) {
@@ -243,6 +261,9 @@ export class FulfillmentService {
     const { data: order, error } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
     if (error) throw error;
     if (!order) throw ApiError.notFound('Order not found');
+    if (order.channel === 'BULK_OFFLINE') {
+      throw ApiError.badRequest('Bulk / offline orders do not use delivery or shipping');
+    }
 
     const waybill = typeof order.delhivery_waybill === 'string' ? order.delhivery_waybill.trim() : '';
     if (!waybill) {
@@ -278,6 +299,9 @@ export class FulfillmentService {
     const { data: order, error } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
     if (error) throw error;
     if (!order) throw ApiError.notFound('Order not found');
+    if (order.channel === 'BULK_OFFLINE') {
+      throw ApiError.badRequest('Bulk / offline orders do not use delivery or shipping');
+    }
 
     if (!order.delhivery_waybill) {
       throw ApiError.badRequest('Create shipment first — order has no Delhivery waybill yet');
@@ -333,12 +357,18 @@ export class FulfillmentService {
    * When `userId` is set, only that order owner may fetch.
    */
   async getTrackingForOrder(orderId: string, options?: { userId?: string }) {
-    let qb = supabase.from('orders').select('id, user_id, delhivery_waybill, delhivery_status').eq('id', orderId);
+    let qb = supabase
+      .from('orders')
+      .select('id, user_id, status, channel, delhivery_waybill, delhivery_status')
+      .eq('id', orderId);
     if (options?.userId) qb = qb.eq('user_id', options.userId);
 
     const { data: order, error } = await qb.maybeSingle();
     if (error) throw error;
     if (!order) throw ApiError.notFound('Order not found');
+    if (order.channel === 'BULK_OFFLINE') {
+      throw ApiError.badRequest('Bulk / offline orders do not use delivery or shipping');
+    }
 
     const waybill = typeof order.delhivery_waybill === 'string' ? order.delhivery_waybill.trim() : '';
     if (!waybill) {
@@ -348,22 +378,210 @@ export class FulfillmentService {
     const { fetchDelhiveryTracking } = await import('../../lib/delhivery/track-shipment.js');
     const tracking = await fetchDelhiveryTracking(waybill);
 
-    // Soft-sync status string for admin lists (non-blocking best effort)
-    if (tracking.status && tracking.status !== order.delhivery_status) {
-      void supabase
-        .from('orders')
-        .update({ delhivery_status: tracking.status })
-        .eq('id', orderId)
-        .then(({ error: syncErr }) => {
-          if (syncErr) console.warn('[fulfillment] track status sync failed', orderId, syncErr.message);
-        });
-    }
+    const orderStatus = await this.persistTrackingOnOrder(orderId, {
+      currentStatus: order.status as string | undefined,
+      delhiveryStatus: (order.delhivery_status as string | null) ?? null,
+      trackingStatus: tracking.status,
+      trackingStatusType: tracking.statusType,
+    });
 
-    return tracking;
+    return { ...tracking, orderStatus };
   }
 
-  /** Admin Pickups page — needs schedule vs already scheduled with date/time. */
+  /**
+   * Refresh open waybills from Delhivery so admin lists match live delivery
+   * (Delivered / In transit) without opening Track order first.
+   * Status is stored only — customer email stays on the manual status path.
+   */
+  async syncActiveShipments() {
+    await this.reconcileStoredDeliveryStatus();
+
+    const now = Date.now();
+    if (now - this.lastBulkSyncAt < 60_000) return;
+    if (!isDelhiveryConfigured()) return;
+    this.lastBulkSyncAt = now;
+
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id, status, delhivery_waybill, delhivery_status')
+      .not('delhivery_waybill', 'is', null)
+      .in('status', ['paid', 'processing', 'shipped'])
+      .order('updated_at', { ascending: false })
+      .limit(40);
+
+    if (error || !data?.length) return;
+
+    const { fetchDelhiveryTrackingBulk } = await import('../../lib/delhivery/track-shipment.js');
+    let tracks: Awaited<ReturnType<typeof fetchDelhiveryTrackingBulk>> = [];
+    try {
+      tracks = await fetchDelhiveryTrackingBulk(
+        data.map((o) => String(o.delhivery_waybill ?? '')).filter(Boolean)
+      );
+    } catch (err) {
+      console.warn('[fulfillment] bulk track failed', err instanceof Error ? err.message : err);
+      return;
+    }
+
+    const byWaybill = new Map(tracks.map((t) => [t.waybill, t]));
+    for (const row of data) {
+      const wbn = String(row.delhivery_waybill ?? '');
+      const track = byWaybill.get(wbn);
+      if (!track) continue;
+      await this.persistTrackingOnOrder(row.id as string, {
+        currentStatus: row.status as string,
+        delhiveryStatus: (row.delhivery_status as string | null) ?? null,
+        trackingStatus: track.status,
+        trackingStatusType: track.statusType,
+      });
+    }
+  }
+
+  /** Promote orders.status when delhivery_status already says Delivered / In transit. */
+  private async reconcileStoredDeliveryStatus() {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id, status, delhivery_status')
+      .not('delhivery_status', 'is', null)
+      .in('status', ['paid', 'processing', 'shipped'])
+      .limit(200);
+
+    if (error || !data?.length) return;
+
+    for (const row of data) {
+      const stage = deliveryStageFromDelhivery({ status: row.delhivery_status as string });
+      const next = promotedOrderStatus(row.status as string, stage);
+      if (!next) continue;
+      const { error: upErr } = await supabase.from('orders').update({ status: next }).eq('id', row.id);
+      if (upErr) continue;
+      if (next === 'delivered' && row.status !== 'delivered') {
+        await this.settleCodPaymentOnDelivered(row.id as string);
+        await this.notifyOrderDelivered(row.id as string);
+      }
+    }
+  }
+
+  private async persistTrackingOnOrder(
+    orderId: string,
+    input: {
+      currentStatus?: string | null;
+      delhiveryStatus?: string | null;
+      trackingStatus: string | null;
+      trackingStatusType: string | null;
+    }
+  ): Promise<string | null> {
+    const patch: Record<string, string> = {};
+    if (input.trackingStatus && input.trackingStatus !== input.delhiveryStatus) {
+      patch.delhivery_status = input.trackingStatus;
+    }
+    const stage = deliveryStageFromDelhivery({
+      status: input.trackingStatus,
+      statusType: input.trackingStatusType,
+    });
+    const prevStatus = input.currentStatus ?? '';
+    const next = promotedOrderStatus(prevStatus, stage);
+    if (next) patch.status = next;
+    if (Object.keys(patch).length === 0) return input.currentStatus ?? null;
+
+    const { error } = await supabase.from('orders').update(patch).eq('id', orderId);
+    if (error) {
+      console.warn('[fulfillment] track status sync failed', orderId, error.message);
+      return input.currentStatus ?? null;
+    }
+    if (next === 'delivered' && prevStatus !== 'delivered') {
+      await this.settleCodPaymentOnDelivered(orderId);
+      await this.notifyOrderDelivered(orderId);
+    }
+    return next ?? input.currentStatus ?? null;
+  }
+
+  /**
+   * When Delhivery first reports delivered, COD cash was collected at the door.
+   * Idempotent — only updates open COD payment rows + sets paid_at when missing.
+   * Razorpay / prepaid orders are untouched (no COD payment row).
+   */
+  async settleCodPaymentOnDelivered(orderId: string) {
+    try {
+      const { data: payments, error } = await supabase
+        .from('payments')
+        .select('id, status')
+        .eq('order_id', orderId)
+        .eq('provider', 'cod')
+        .limit(5);
+      if (error || !payments?.length) return { settled: false as const, reason: 'not_cod' as const };
+
+      const open = payments.filter(
+        (p) => p.status !== 'captured' && p.status !== 'paid' && p.status !== 'refunded'
+      );
+      if (open.length === 0) return { settled: false as const, reason: 'already_collected' as const };
+
+      const now = new Date().toISOString();
+      for (const p of open) {
+        await supabase
+          .from('payments')
+          .update({ status: 'captured', updated_at: now })
+          .eq('id', p.id);
+      }
+      await supabase
+        .from('orders')
+        .update({ paid_at: now })
+        .eq('id', orderId)
+        .is('paid_at', null);
+      return { settled: true as const, reason: 'ok' as const };
+    } catch (err) {
+      console.warn(
+        '[fulfillment] COD settle on Delhivery delivered failed',
+        orderId,
+        err instanceof Error ? err.message : err
+      );
+      return { settled: false as const, reason: 'error' as const };
+    }
+  }
+
+  /** Email + in-app notice when Delhivery sync first marks an order delivered. */
+  private async notifyOrderDelivered(orderId: string) {
+    try {
+      const { data: order, error } = await supabase
+        .from('orders')
+        .select('id, user_id, order_number, status, shipping_address')
+        .eq('id', orderId)
+        .maybeSingle();
+      if (error || !order || order.status !== 'delivered') return;
+
+      const { notificationsService } = await import('../notifications/notifications.service.js');
+      await notificationsService.safeCreate({
+        userId: order.user_id as string,
+        type: 'order_delivered',
+        title: 'Order delivered',
+        body: `Order ${order.order_number} was delivered.`,
+        link: `/dashboard/orders/${order.id}`,
+        metadata: {
+          order_id: order.id,
+          order_number: order.order_number,
+          status: 'delivered',
+        },
+      });
+
+      const { sendOrderDeliveredEmailForOrder } = await import('../../lib/mailer/index.js');
+      sendOrderDeliveredEmailForOrder({
+        id: order.id as string,
+        user_id: order.user_id as string,
+        order_number: order.order_number as string,
+        shipping_address: order.shipping_address,
+      });
+    } catch (err) {
+      console.warn(
+        '[fulfillment] delivered notify failed',
+        orderId,
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
+  /** Admin Pickups page — needs schedule, scheduled, and already delivered. */
   async listPickupsForAdmin() {
+    await this.syncActiveShipments().catch((err) => {
+      console.warn('[fulfillment] pickup sync', err instanceof Error ? err.message : err);
+    });
     const { data, error } = await supabase
       .from('orders')
       .select(
@@ -397,11 +615,19 @@ export class FulfillmentService {
       };
     };
 
-    const needs = rows
+    const delivered = rows.filter((o) =>
+      isDeliveredShipment({
+        status: o.status as string,
+        delhiveryStatus: (o.delhivery_status as string | null) ?? null,
+      })
+    );
+    const open = rows.filter((o) => !delivered.includes(o));
+
+    const needs = open
       .filter((o) => o.delhivery_waybill && !o.delhivery_pickup_token)
       .map(mapRow);
 
-    const scheduled = rows
+    const scheduled = open
       .filter((o) => o.delhivery_pickup_token)
       .map(mapRow)
       .sort((a, b) => {
@@ -414,7 +640,7 @@ export class FulfillmentService {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
 
-    return { needs, scheduled };
+    return { needs, scheduled, delivered: delivered.map(mapRow) };
   }
 
   private async notifyProcessing(order: { id: string; user_id: string; order_number: string }) {

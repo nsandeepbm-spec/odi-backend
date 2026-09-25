@@ -47,6 +47,7 @@ drop type if exists public.payment_status cascade;
 drop type if exists public.order_status cascade;
 drop type if exists public.coupon_type cascade;
 drop type if exists public.product_status cascade;
+drop type if exists public.order_channel cascade;
 drop type if exists public.support_ticket_status cascade;
 drop type if exists public.inquiry_status cascade;
 drop type if exists public.refund_status cascade;
@@ -57,6 +58,7 @@ create type public.coupon_type as enum ('percent', 'fixed_paise');
 create type public.order_status as enum (
   'pending', 'paid', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'
 );
+create type public.order_channel as enum ('ONLINE', 'BULK_OFFLINE');
 create type public.payment_status as enum (
   'created', 'authorized', 'captured', 'failed', 'refunded'
 );
@@ -520,10 +522,13 @@ create index coupon_products_product_idx on public.coupon_products (product_id);
 create table public.orders (
   id                  uuid primary key default gen_random_uuid(),
   order_number        text not null unique,
-  user_id             uuid not null references public.users(id) on delete restrict,
+  /** Null for BULK_OFFLINE buyers without an app account. Required for ONLINE. */
+  user_id             uuid references public.users(id) on delete restrict,
+  channel             public.order_channel not null default 'ONLINE',
   status              public.order_status not null default 'pending',
   subtotal_paise      integer not null check (subtotal_paise >= 0),
   discount_paise      integer not null default 0 check (discount_paise >= 0),
+  tax_paise           integer not null default 0 check (tax_paise >= 0),
   shipping_paise      integer not null default 0 check (shipping_paise >= 0),
   total_paise         integer not null check (total_paise >= 0),
   currency            text not null default 'INR',
@@ -541,12 +546,17 @@ create table public.orders (
   delhivery_raw       jsonb,
   /** Null for normal orders. `payment_abandoned` = unpaid Razorpay checkout expired (not a customer cancel). */
   payment_close_reason text,
+  /** Bulk/offline only — UPI, Cash, Online Payment, Bank Transfer, etc. */
+  bulk_payment_method text,
+  bulk_notes          text,
+  created_by_admin_id uuid references public.users(id) on delete set null,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
 
 create index orders_user_idx on public.orders (user_id, created_at desc);
 create index orders_status_idx on public.orders (status);
+create index orders_channel_created_idx on public.orders (channel, created_at desc);
 create index orders_delhivery_waybill_idx on public.orders (delhivery_waybill)
   where delhivery_waybill is not null;
 create index orders_delhivery_pickup_date_idx on public.orders (delhivery_pickup_date desc)

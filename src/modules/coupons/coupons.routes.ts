@@ -1,6 +1,4 @@
 import { Router } from 'express';
-import { authenticate } from '../../middleware/authenticate.js';
-import { loadUser } from '../../middleware/loadUser.js';
 import { optionalAuthenticate, optionalLoadUser } from '../../middleware/optionalAuth.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
@@ -9,7 +7,7 @@ import { listOffersQuerySchema, validateCouponSchema } from './coupons.schema.js
 
 const router = Router();
 
-/** Public list of checkout offers — guests OK. Apply still requires auth via /validate. */
+/** Public list of checkout offers — guests OK. */
 router.get(
   '/offers',
   optionalAuthenticate,
@@ -28,17 +26,25 @@ router.get(
   })
 );
 
+/**
+ * Preview apply — guests OK with `items` in the body.
+ * Signed-in callers also get per-user redemption checks. Checkout still re-validates.
+ */
 router.post(
   '/validate',
-  authenticate,
-  loadUser,
+  optionalAuthenticate,
+  optionalLoadUser,
   asyncHandler(async (req, res) => {
     const parsed = validateCouponSchema.safeParse(req.body);
     if (!parsed.success) {
       throw ApiError.badRequest('Invalid coupon request', parsed.error.flatten().fieldErrors);
     }
+    const userId = req.user?.id ?? null;
+    if (!userId && !parsed.data.items?.length) {
+      throw ApiError.badRequest('Provide items to preview a coupon, or sign in to use your cart');
+    }
     const result = await couponsService.validateForUser(
-      req.user!.id,
+      userId,
       parsed.data.code,
       parsed.data.items
     );

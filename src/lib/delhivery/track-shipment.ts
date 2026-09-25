@@ -86,14 +86,12 @@ export async function fetchDelhiveryTracking(waybill: string): Promise<Delhivery
     throw ApiError.badRequest(root.Error.trim(), { delhivery: raw });
   }
 
-  const shipmentData = Array.isArray(root?.ShipmentData) ? root!.ShipmentData : [];
-  const first = shipmentData[0];
-  const shipmentWrap = asRecord(first);
-  const shipment = asRecord(shipmentWrap?.Shipment) ?? shipmentWrap;
-  if (!shipment) {
-    throw ApiError.notFound('No tracking data for this waybill');
-  }
+  const parsed = parseTrackingPayload(raw, wbn);
+  if (!parsed) throw ApiError.notFound('No tracking data for this waybill');
+  return parsed;
+}
 
+function parseOneShipment(shipment: Record<string, unknown>, fallbackWaybill: string, raw: unknown): DelhiveryTrackingResult {
   const statusObj = asRecord(shipment.Status);
   const scansRaw = Array.isArray(shipment.Scans) ? shipment.Scans : [];
   const scans: DelhiveryTrackingScan[] = scansRaw
@@ -112,7 +110,6 @@ export async function fetchDelhiveryTracking(waybill: string): Promise<Delhivery
     })
     .filter((s): s is DelhiveryTrackingScan => s !== null);
 
-  // Newest first for UI timeline
   scans.sort((a, b) => {
     const ta = a.scanDateTime ? Date.parse(a.scanDateTime) : 0;
     const tb = b.scanDateTime ? Date.parse(b.scanDateTime) : 0;
@@ -120,7 +117,7 @@ export async function fetchDelhiveryTracking(waybill: string): Promise<Delhivery
   });
 
   return {
-    waybill: asString(shipment.AWB) ?? wbn,
+    waybill: asString(shipment.AWB) ?? fallbackWaybill,
     status: asString(statusObj?.Status),
     statusType: asString(statusObj?.StatusType),
     statusCode: asString(statusObj?.StatusCode),
@@ -136,4 +133,48 @@ export async function fetchDelhiveryTracking(waybill: string): Promise<Delhivery
     scans,
     raw,
   };
+}
+
+function parseTrackingPayload(raw: unknown, fallbackWaybill: string): DelhiveryTrackingResult | null {
+  const root = asRecord(raw);
+  const shipmentData = Array.isArray(root?.ShipmentData) ? root.ShipmentData : [];
+  const first = shipmentData[0];
+  const shipmentWrap = asRecord(first);
+  const shipment = asRecord(shipmentWrap?.Shipment) ?? shipmentWrap;
+  if (!shipment) return null;
+  return parseOneShipment(shipment, fallbackWaybill, raw);
+}
+
+/** Up to 50 waybills in one Delhivery pull. Missing waybills are omitted. */
+export async function fetchDelhiveryTrackingBulk(waybills: string[]): Promise<DelhiveryTrackingResult[]> {
+  const unique = [...new Set(waybills.map((w) => w.trim()).filter(Boolean))].slice(0, 50);
+  if (unique.length === 0) return [];
+  if (!isDelhiveryConfigured()) return [];
+
+  const url =
+    `${getDelhiveryBaseUrl()}${DELHIVERY_API_PATHS.trackShipment}` +
+    `?waybill=${encodeURIComponent(unique.join(','))}&ref_ids=`;
+
+  const res = await fetchDelhiveryGet(url);
+  const text = await res.text();
+  let raw: unknown = {};
+  if (text) {
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      return [];
+    }
+  }
+  if (!res.ok) return [];
+
+  const root = asRecord(raw);
+  const shipmentData = Array.isArray(root?.ShipmentData) ? root.ShipmentData : [];
+  const out: DelhiveryTrackingResult[] = [];
+  for (const row of shipmentData) {
+    const wrap = asRecord(row);
+    const shipment = asRecord(wrap?.Shipment) ?? wrap;
+    if (!shipment) continue;
+    out.push(parseOneShipment(shipment, unique[0] ?? '', raw));
+  }
+  return out;
 }
