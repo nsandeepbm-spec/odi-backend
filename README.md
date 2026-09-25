@@ -26,7 +26,9 @@ Public health check: `GET /health` (ok to probe in production).
 
 1. Google account for store mail (see `.env.example` `MAIL_FROM` / `SMTP_USER`).
 2. Enable **2-Step Verification**, create an **App password**.
-3. Set `MAIL_FROM`, `SMTP_USER`, `SMTP_PASS`, and `FRONTEND_URL` (local site or production site).
+3. Set `MAIL_FROM`, `SMTP_USER`, `SMTP_PASS`, and `FRONTEND_URL`.
+   - Local: `FRONTEND_URL=http://localhost:5173`
+   - Production API (`NODE_ENV=production`): must be `FRONTEND_URL=https://odi.studio` (email CTAs like “Write a review”). If production still has a localhost value, the API falls back to `https://odi.studio` so live emails never link to localhost.
 
 Logo and social icon URLs for email HTML live in `src/lib/mailer/brand.ts` (public brand assets). Do not put those URLs in `.env`.
 

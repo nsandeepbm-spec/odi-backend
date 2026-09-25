@@ -18,6 +18,7 @@ const C = {
 const FONT = "'Afacad Flux', Arial, Helvetica, sans-serif";
 
 export function absoluteUrl(path: string): string {
+  // env.frontendUrl already rewrites localhost → https://odi.studio in production
   const base = env.frontendUrl;
   if (!path) return base;
   return path.startsWith('http') ? path : `${base}${path.startsWith('/') ? path : `/${path}`}`;

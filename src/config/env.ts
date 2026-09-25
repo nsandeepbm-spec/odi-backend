@@ -13,6 +13,31 @@ const optional = (key: string): string | null => {
   return value && value.trim() ? value.trim() : null;
 };
 
+const PRODUCTION_SITE_URL = 'https://odi.studio';
+
+function isLocalFrontendUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.local');
+  } catch {
+    return /localhost|127\.0\.0\.1/i.test(url);
+  }
+}
+
+/** Email / deep-link base. Never ship localhost links from a production API. */
+function resolveFrontendUrl(raw: string | null): string {
+  const isProd = (process.env.NODE_ENV ?? 'development') === 'production';
+  const fallback = isProd ? PRODUCTION_SITE_URL : 'http://localhost:5173';
+  const trimmed = (raw ?? fallback).replace(/\/$/, '');
+  if (isProd && isLocalFrontendUrl(trimmed)) {
+    console.warn(
+      `[env] FRONTEND_URL is local (${trimmed}) but NODE_ENV=production — using ${PRODUCTION_SITE_URL} for email links`
+    );
+    return PRODUCTION_SITE_URL;
+  }
+  return trimmed;
+}
+
 const port = Number(process.env.PORT ?? 5000);
 if (!Number.isInteger(port) || port < 1 || port > 65_535) {
   throw new Error('PORT must be an integer between 1 and 65535');
@@ -91,8 +116,11 @@ export const env = {
     ),
   },
 
-  /** Public site URL for email CTAs (local or https://odi.studio). */
-  frontendUrl: (optional('FRONTEND_URL') ?? 'http://localhost:5173').replace(/\/$/, ''),
+  /**
+   * Public storefront URL for email CTAs (“Write a review”, View order, etc.).
+   * Production never uses localhost — even if FRONTEND_URL was copied from local .env.
+   */
+  frontendUrl: resolveFrontendUrl(optional('FRONTEND_URL')),
 
   mail: {
     from: optional('MAIL_FROM') ?? 'ODI <odistudio24@gmail.com>',
